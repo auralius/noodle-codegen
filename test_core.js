@@ -1,0 +1,30 @@
+require('./bare_uart_bundle.js');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const {sampleUno,sampleFire,fromR14Graph,normalizeProject,validate,parseTopology,cppPreview}=require('./studio.js');
+let a=sampleUno(),b=sampleFire();
+for(const [label,p] of [['Uno',a],['Fire',b]]){
+  const v=validate(p);
+  assert.equal(v.errors.length,0,`${label}: ${v.errors}`);
+  console.log(label,'OK;',v.steps.length,'calls;',v.warnings.length,'warnings');
+}
+let raw=JSON.parse(fs.readFileSync('./r14_generated_graph.json','utf8'));
+let r14=fromR14Graph(raw), val=validate(r14);
+assert.equal(r14.layers.length,39);
+assert.equal(val.steps.length,39);
+assert.equal(val.errors.length,0,val.errors.join('\n'));
+assert.equal(r14.storage.some(b=>b.name==='X'),true);
+assert.equal(r14.layers.filter(l=>l.kind==='CONV_2D').length,26);
+assert.equal(r14.layers.filter(l=>l.kind==='CONCATENATION').length,8);
+console.log('R14 import OK; 39 calls, 26 convolutions, 8 concatenations; ',r14.storage.length,'storage handles;',val.warnings.length,'warnings');
+let json=normalizeProject(JSON.parse(JSON.stringify(r14)));
+assert.deepEqual(json,r14);
+assert.match(cppPreview(r14),/execute_conv1\(X, A\)/);
+let bad=sampleUno();bad.topology='buffA = layer1(missing);\nout1 = layer2(buffA);';
+assert(validate(bad).errors.some(x=>x.includes('missing')));
+let badBoard=sampleFire();badBoard.target='uno';
+assert(validate(badBoard).errors.some(x=>x.includes('unsupported')));
+let branch=sampleFire();branch.topology+='\ns = squeeze(e1);';
+assert(validate(branch).errors.some(x=>x.includes('destroyed')));
+assert.deepEqual(parseTopology('// comment\nA=layer1(B);\ndestroy(A);').steps.map(x=>x.type),['layer','destroy']);
+console.log('All local checks passed');

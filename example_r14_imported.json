@@ -1,0 +1,323 @@
+{
+  "format": "noodle-studio-r15/v0.1",
+  "target": "esp32s3",
+  "source": {
+    "name": "R14 generated_graph.json",
+    "type": "R14 imported",
+    "model_sha256": "f4088a35cdca497b0987a324a662c24995b295b466d9fc6ff625ce6def7a2652"
+  },
+  "storage": [
+    {
+      "name": "X",
+      "backend": "PSRAM",
+      "path": "",
+      "shape": "1,224,224,3"
+    },
+    {
+      "name": "A",
+      "backend": "PSRAM",
+      "path": "",
+      "shape": ""
+    },
+    {
+      "name": "B",
+      "backend": "PSRAM",
+      "path": "",
+      "shape": ""
+    },
+    {
+      "name": "S",
+      "backend": "PSRAM",
+      "path": "",
+      "shape": ""
+    },
+    {
+      "name": "E1",
+      "backend": "PSRAM",
+      "path": "",
+      "shape": ""
+    },
+    {
+      "name": "E3",
+      "backend": "PSRAM",
+      "path": "",
+      "shape": ""
+    }
+  ],
+  "layers": [
+    {
+      "name": "conv1",
+      "kind": "CONV_2D",
+      "params": "XIP",
+      "output_shape": "1,111,111,64",
+      "notes": "Imported from R14 op 2"
+    },
+    {
+      "name": "pool1",
+      "kind": "MAX_POOL_2D",
+      "params": "-",
+      "output_shape": "1,55,55,64",
+      "notes": "Imported from R14 op 3"
+    },
+    {
+      "name": "fire2_squeeze",
+      "kind": "CONV_2D",
+      "params": "XIP",
+      "output_shape": "1,55,55,16",
+      "notes": "Imported from R14 op 4"
+    },
+    {
+      "name": "fire2_expand1",
+      "kind": "CONV_2D",
+      "params": "XIP",
+      "output_shape": "1,55,55,64",
+      "notes": "Imported from R14 op 5"
+    },
+    {
+      "name": "fire2_expand3",
+      "kind": "CONV_2D",
+      "params": "XIP",
+      "output_shape": "1,55,55,64",
+      "notes": "Imported from R14 op 6"
+    },
+    {
+      "name": "fire2_concat",
+      "kind": "CONCATENATION",
+      "params": "-",
+      "output_shape": "1,55,55,128",
+      "notes": "Imported from R14 op 7"
+    },
+    {
+      "name": "fire3_squeeze",
+      "kind": "CONV_2D",
+      "params": "XIP",
+      "output_shape": "1,55,55,16",
+      "notes": "Imported from R14 op 8"
+    },
+    {
+      "name": "fire3_expand1",
+      "kind": "CONV_2D",
+      "params": "XIP",
+      "output_shape": "1,55,55,64",
+      "notes": "Imported from R14 op 9"
+    },
+    {
+      "name": "fire3_expand3",
+      "kind": "CONV_2D",
+      "params": "XIP",
+      "output_shape": "1,55,55,64",
+      "notes": "Imported from R14 op 10"
+    },
+    {
+      "name": "fire3_concat",
+      "kind": "CONCATENATION",
+      "params": "-",
+      "output_shape": "1,55,55,128",
+      "notes": "Imported from R14 op 11"
+    },
+    {
+      "name": "pool2",
+      "kind": "MAX_POOL_2D",
+      "params": "-",
+      "output_shape": "1,27,27,128",
+      "notes": "Imported from R14 op 12"
+    },
+    {
+      "name": "fire4_squeeze",
+      "kind": "CONV_2D",
+      "params": "XIP",
+      "output_shape": "1,27,27,32",
+      "notes": "Imported from R14 op 13"
+    },
+    {
+      "name": "fire4_expand1",
+      "kind": "CONV_2D",
+      "params": "XIP",
+      "output_shape": "1,27,27,128",
+      "notes": "Imported from R14 op 14"
+    },
+    {
+      "name": "fire4_expand3",
+      "kind": "CONV_2D",
+      "params": "XIP",
+      "output_shape": "1,27,27,128",
+      "notes": "Imported from R14 op 15"
+    },
+    {
+      "name": "fire4_concat",
+      "kind": "CONCATENATION",
+      "params": "-",
+      "output_shape": "1,27,27,256",
+      "notes": "Imported from R14 op 16"
+    },
+    {
+      "name": "fire5_squeeze",
+      "kind": "CONV_2D",
+      "params": "XIP",
+      "output_shape": "1,27,27,32",
+      "notes": "Imported from R14 op 17"
+    },
+    {
+      "name": "fire5_expand1",
+      "kind": "CONV_2D",
+      "params": "XIP",
+      "output_shape": "1,27,27,128",
+      "notes": "Imported from R14 op 18"
+    },
+    {
+      "name": "fire5_expand3",
+      "kind": "CONV_2D",
+      "params": "XIP",
+      "output_shape": "1,27,27,128",
+      "notes": "Imported from R14 op 19"
+    },
+    {
+      "name": "fire5_concat",
+      "kind": "CONCATENATION",
+      "params": "-",
+      "output_shape": "1,27,27,256",
+      "notes": "Imported from R14 op 20"
+    },
+    {
+      "name": "pool3",
+      "kind": "MAX_POOL_2D",
+      "params": "-",
+      "output_shape": "1,13,13,256",
+      "notes": "Imported from R14 op 21"
+    },
+    {
+      "name": "fire6_squeeze",
+      "kind": "CONV_2D",
+      "params": "XIP",
+      "output_shape": "1,13,13,48",
+      "notes": "Imported from R14 op 22"
+    },
+    {
+      "name": "fire6_expand1",
+      "kind": "CONV_2D",
+      "params": "XIP",
+      "output_shape": "1,13,13,192",
+      "notes": "Imported from R14 op 23"
+    },
+    {
+      "name": "fire6_expand3",
+      "kind": "CONV_2D",
+      "params": "XIP",
+      "output_shape": "1,13,13,192",
+      "notes": "Imported from R14 op 24"
+    },
+    {
+      "name": "fire6_concat",
+      "kind": "CONCATENATION",
+      "params": "-",
+      "output_shape": "1,13,13,384",
+      "notes": "Imported from R14 op 25"
+    },
+    {
+      "name": "fire7_squeeze",
+      "kind": "CONV_2D",
+      "params": "XIP",
+      "output_shape": "1,13,13,48",
+      "notes": "Imported from R14 op 26"
+    },
+    {
+      "name": "fire7_expand1",
+      "kind": "CONV_2D",
+      "params": "XIP",
+      "output_shape": "1,13,13,192",
+      "notes": "Imported from R14 op 27"
+    },
+    {
+      "name": "fire7_expand3",
+      "kind": "CONV_2D",
+      "params": "XIP",
+      "output_shape": "1,13,13,192",
+      "notes": "Imported from R14 op 28"
+    },
+    {
+      "name": "fire7_concat",
+      "kind": "CONCATENATION",
+      "params": "-",
+      "output_shape": "1,13,13,384",
+      "notes": "Imported from R14 op 29"
+    },
+    {
+      "name": "fire8_squeeze",
+      "kind": "CONV_2D",
+      "params": "XIP",
+      "output_shape": "1,13,13,64",
+      "notes": "Imported from R14 op 30"
+    },
+    {
+      "name": "fire8_expand1",
+      "kind": "CONV_2D",
+      "params": "XIP",
+      "output_shape": "1,13,13,256",
+      "notes": "Imported from R14 op 31"
+    },
+    {
+      "name": "fire8_expand3",
+      "kind": "CONV_2D",
+      "params": "XIP",
+      "output_shape": "1,13,13,256",
+      "notes": "Imported from R14 op 32"
+    },
+    {
+      "name": "fire8_concat",
+      "kind": "CONCATENATION",
+      "params": "-",
+      "output_shape": "1,13,13,512",
+      "notes": "Imported from R14 op 33"
+    },
+    {
+      "name": "fire9_squeeze",
+      "kind": "CONV_2D",
+      "params": "XIP",
+      "output_shape": "1,13,13,64",
+      "notes": "Imported from R14 op 34"
+    },
+    {
+      "name": "fire9_expand1",
+      "kind": "CONV_2D",
+      "params": "XIP",
+      "output_shape": "1,13,13,256",
+      "notes": "Imported from R14 op 35"
+    },
+    {
+      "name": "fire9_expand3",
+      "kind": "CONV_2D",
+      "params": "XIP",
+      "output_shape": "1,13,13,256",
+      "notes": "Imported from R14 op 36"
+    },
+    {
+      "name": "fire9_concat",
+      "kind": "CONCATENATION",
+      "params": "-",
+      "output_shape": "1,13,13,512",
+      "notes": "Imported from R14 op 37"
+    },
+    {
+      "name": "final_conv",
+      "kind": "CONV_2D",
+      "params": "XIP",
+      "output_shape": "1,13,13,1000",
+      "notes": "Imported from R14 op 38"
+    },
+    {
+      "name": "gap",
+      "kind": "MEAN",
+      "params": "-",
+      "output_shape": "1,1,1,1000",
+      "notes": "Imported from R14 op 39"
+    },
+    {
+      "name": "reshape",
+      "kind": "RESHAPE",
+      "params": "-",
+      "output_shape": "1,1000",
+      "notes": "Imported from R14 op 40"
+    }
+  ],
+  "topology": "A = conv1(X);\nB = pool1(A);\nS = fire2_squeeze(B);\nE1 = fire2_expand1(S);\nE3 = fire2_expand3(S);\nA = fire2_concat(E1, E3);\nS = fire3_squeeze(A);\nE1 = fire3_expand1(S);\nE3 = fire3_expand3(S);\nB = fire3_concat(E1, E3);\nA = pool2(B);\nS = fire4_squeeze(A);\nE1 = fire4_expand1(S);\nE3 = fire4_expand3(S);\nB = fire4_concat(E1, E3);\nS = fire5_squeeze(B);\nE1 = fire5_expand1(S);\nE3 = fire5_expand3(S);\nA = fire5_concat(E1, E3);\nB = pool3(A);\nS = fire6_squeeze(B);\nE1 = fire6_expand1(S);\nE3 = fire6_expand3(S);\nA = fire6_concat(E1, E3);\nS = fire7_squeeze(A);\nE1 = fire7_expand1(S);\nE3 = fire7_expand3(S);\nB = fire7_concat(E1, E3);\nS = fire8_squeeze(B);\nE1 = fire8_expand1(S);\nE3 = fire8_expand3(S);\nA = fire8_concat(E1, E3);\nS = fire9_squeeze(A);\nE1 = fire9_expand1(S);\nE3 = fire9_expand3(S);\nB = fire9_concat(E1, E3);\nA = final_conv(B);\nA = gap(A);\nA = reshape(A);"
+}

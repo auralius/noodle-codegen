@@ -1,0 +1,636 @@
+{
+  "model_sha256": "f4088a35cdca497b0987a324a662c24995b295b466d9fc6ff625ce6def7a2652",
+  "backend": "esp32s3_psram_fp32_six_buffers",
+  "steps": [
+    {
+      "name": "conv1",
+      "op_index": 2,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        58
+      ],
+      "output_tensor_id": 59,
+      "output_shape": [
+        1,
+        111,
+        111,
+        64
+      ],
+      "buffer": "A"
+    },
+    {
+      "name": "pool1",
+      "op_index": 3,
+      "kind": "MAX_POOL_2D",
+      "input_tensor_ids": [
+        59
+      ],
+      "output_tensor_id": 60,
+      "output_shape": [
+        1,
+        55,
+        55,
+        64
+      ],
+      "buffer": "B"
+    },
+    {
+      "name": "fire2_squeeze",
+      "op_index": 4,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        60
+      ],
+      "output_tensor_id": 61,
+      "output_shape": [
+        1,
+        55,
+        55,
+        16
+      ],
+      "buffer": "S"
+    },
+    {
+      "name": "fire2_expand1",
+      "op_index": 5,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        61
+      ],
+      "output_tensor_id": 62,
+      "output_shape": [
+        1,
+        55,
+        55,
+        64
+      ],
+      "buffer": "E1"
+    },
+    {
+      "name": "fire2_expand3",
+      "op_index": 6,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        61
+      ],
+      "output_tensor_id": 63,
+      "output_shape": [
+        1,
+        55,
+        55,
+        64
+      ],
+      "buffer": "E3"
+    },
+    {
+      "name": "fire2_concat",
+      "op_index": 7,
+      "kind": "CONCATENATION",
+      "input_tensor_ids": [
+        62,
+        63
+      ],
+      "output_tensor_id": 64,
+      "output_shape": [
+        1,
+        55,
+        55,
+        128
+      ],
+      "buffer": "A"
+    },
+    {
+      "name": "fire3_squeeze",
+      "op_index": 8,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        64
+      ],
+      "output_tensor_id": 65,
+      "output_shape": [
+        1,
+        55,
+        55,
+        16
+      ],
+      "buffer": "S"
+    },
+    {
+      "name": "fire3_expand1",
+      "op_index": 9,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        65
+      ],
+      "output_tensor_id": 66,
+      "output_shape": [
+        1,
+        55,
+        55,
+        64
+      ],
+      "buffer": "E1"
+    },
+    {
+      "name": "fire3_expand3",
+      "op_index": 10,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        65
+      ],
+      "output_tensor_id": 67,
+      "output_shape": [
+        1,
+        55,
+        55,
+        64
+      ],
+      "buffer": "E3"
+    },
+    {
+      "name": "fire3_concat",
+      "op_index": 11,
+      "kind": "CONCATENATION",
+      "input_tensor_ids": [
+        66,
+        67
+      ],
+      "output_tensor_id": 68,
+      "output_shape": [
+        1,
+        55,
+        55,
+        128
+      ],
+      "buffer": "B"
+    },
+    {
+      "name": "pool2",
+      "op_index": 12,
+      "kind": "MAX_POOL_2D",
+      "input_tensor_ids": [
+        68
+      ],
+      "output_tensor_id": 69,
+      "output_shape": [
+        1,
+        27,
+        27,
+        128
+      ],
+      "buffer": "A"
+    },
+    {
+      "name": "fire4_squeeze",
+      "op_index": 13,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        69
+      ],
+      "output_tensor_id": 70,
+      "output_shape": [
+        1,
+        27,
+        27,
+        32
+      ],
+      "buffer": "S"
+    },
+    {
+      "name": "fire4_expand1",
+      "op_index": 14,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        70
+      ],
+      "output_tensor_id": 71,
+      "output_shape": [
+        1,
+        27,
+        27,
+        128
+      ],
+      "buffer": "E1"
+    },
+    {
+      "name": "fire4_expand3",
+      "op_index": 15,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        70
+      ],
+      "output_tensor_id": 72,
+      "output_shape": [
+        1,
+        27,
+        27,
+        128
+      ],
+      "buffer": "E3"
+    },
+    {
+      "name": "fire4_concat",
+      "op_index": 16,
+      "kind": "CONCATENATION",
+      "input_tensor_ids": [
+        71,
+        72
+      ],
+      "output_tensor_id": 73,
+      "output_shape": [
+        1,
+        27,
+        27,
+        256
+      ],
+      "buffer": "B"
+    },
+    {
+      "name": "fire5_squeeze",
+      "op_index": 17,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        73
+      ],
+      "output_tensor_id": 74,
+      "output_shape": [
+        1,
+        27,
+        27,
+        32
+      ],
+      "buffer": "S"
+    },
+    {
+      "name": "fire5_expand1",
+      "op_index": 18,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        74
+      ],
+      "output_tensor_id": 75,
+      "output_shape": [
+        1,
+        27,
+        27,
+        128
+      ],
+      "buffer": "E1"
+    },
+    {
+      "name": "fire5_expand3",
+      "op_index": 19,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        74
+      ],
+      "output_tensor_id": 76,
+      "output_shape": [
+        1,
+        27,
+        27,
+        128
+      ],
+      "buffer": "E3"
+    },
+    {
+      "name": "fire5_concat",
+      "op_index": 20,
+      "kind": "CONCATENATION",
+      "input_tensor_ids": [
+        75,
+        76
+      ],
+      "output_tensor_id": 77,
+      "output_shape": [
+        1,
+        27,
+        27,
+        256
+      ],
+      "buffer": "A"
+    },
+    {
+      "name": "pool3",
+      "op_index": 21,
+      "kind": "MAX_POOL_2D",
+      "input_tensor_ids": [
+        77
+      ],
+      "output_tensor_id": 78,
+      "output_shape": [
+        1,
+        13,
+        13,
+        256
+      ],
+      "buffer": "B"
+    },
+    {
+      "name": "fire6_squeeze",
+      "op_index": 22,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        78
+      ],
+      "output_tensor_id": 79,
+      "output_shape": [
+        1,
+        13,
+        13,
+        48
+      ],
+      "buffer": "S"
+    },
+    {
+      "name": "fire6_expand1",
+      "op_index": 23,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        79
+      ],
+      "output_tensor_id": 80,
+      "output_shape": [
+        1,
+        13,
+        13,
+        192
+      ],
+      "buffer": "E1"
+    },
+    {
+      "name": "fire6_expand3",
+      "op_index": 24,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        79
+      ],
+      "output_tensor_id": 81,
+      "output_shape": [
+        1,
+        13,
+        13,
+        192
+      ],
+      "buffer": "E3"
+    },
+    {
+      "name": "fire6_concat",
+      "op_index": 25,
+      "kind": "CONCATENATION",
+      "input_tensor_ids": [
+        80,
+        81
+      ],
+      "output_tensor_id": 82,
+      "output_shape": [
+        1,
+        13,
+        13,
+        384
+      ],
+      "buffer": "A"
+    },
+    {
+      "name": "fire7_squeeze",
+      "op_index": 26,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        82
+      ],
+      "output_tensor_id": 83,
+      "output_shape": [
+        1,
+        13,
+        13,
+        48
+      ],
+      "buffer": "S"
+    },
+    {
+      "name": "fire7_expand1",
+      "op_index": 27,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        83
+      ],
+      "output_tensor_id": 84,
+      "output_shape": [
+        1,
+        13,
+        13,
+        192
+      ],
+      "buffer": "E1"
+    },
+    {
+      "name": "fire7_expand3",
+      "op_index": 28,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        83
+      ],
+      "output_tensor_id": 85,
+      "output_shape": [
+        1,
+        13,
+        13,
+        192
+      ],
+      "buffer": "E3"
+    },
+    {
+      "name": "fire7_concat",
+      "op_index": 29,
+      "kind": "CONCATENATION",
+      "input_tensor_ids": [
+        84,
+        85
+      ],
+      "output_tensor_id": 86,
+      "output_shape": [
+        1,
+        13,
+        13,
+        384
+      ],
+      "buffer": "B"
+    },
+    {
+      "name": "fire8_squeeze",
+      "op_index": 30,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        86
+      ],
+      "output_tensor_id": 87,
+      "output_shape": [
+        1,
+        13,
+        13,
+        64
+      ],
+      "buffer": "S"
+    },
+    {
+      "name": "fire8_expand1",
+      "op_index": 31,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        87
+      ],
+      "output_tensor_id": 88,
+      "output_shape": [
+        1,
+        13,
+        13,
+        256
+      ],
+      "buffer": "E1"
+    },
+    {
+      "name": "fire8_expand3",
+      "op_index": 32,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        87
+      ],
+      "output_tensor_id": 89,
+      "output_shape": [
+        1,
+        13,
+        13,
+        256
+      ],
+      "buffer": "E3"
+    },
+    {
+      "name": "fire8_concat",
+      "op_index": 33,
+      "kind": "CONCATENATION",
+      "input_tensor_ids": [
+        88,
+        89
+      ],
+      "output_tensor_id": 90,
+      "output_shape": [
+        1,
+        13,
+        13,
+        512
+      ],
+      "buffer": "A"
+    },
+    {
+      "name": "fire9_squeeze",
+      "op_index": 34,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        90
+      ],
+      "output_tensor_id": 91,
+      "output_shape": [
+        1,
+        13,
+        13,
+        64
+      ],
+      "buffer": "S"
+    },
+    {
+      "name": "fire9_expand1",
+      "op_index": 35,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        91
+      ],
+      "output_tensor_id": 92,
+      "output_shape": [
+        1,
+        13,
+        13,
+        256
+      ],
+      "buffer": "E1"
+    },
+    {
+      "name": "fire9_expand3",
+      "op_index": 36,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        91
+      ],
+      "output_tensor_id": 93,
+      "output_shape": [
+        1,
+        13,
+        13,
+        256
+      ],
+      "buffer": "E3"
+    },
+    {
+      "name": "fire9_concat",
+      "op_index": 37,
+      "kind": "CONCATENATION",
+      "input_tensor_ids": [
+        92,
+        93
+      ],
+      "output_tensor_id": 94,
+      "output_shape": [
+        1,
+        13,
+        13,
+        512
+      ],
+      "buffer": "B"
+    },
+    {
+      "name": "final_conv",
+      "op_index": 38,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        94
+      ],
+      "output_tensor_id": 95,
+      "output_shape": [
+        1,
+        13,
+        13,
+        1000
+      ],
+      "buffer": "A"
+    },
+    {
+      "name": "gap",
+      "op_index": 39,
+      "kind": "MEAN",
+      "input_tensor_ids": [
+        95
+      ],
+      "output_tensor_id": 96,
+      "output_shape": [
+        1,
+        1,
+        1,
+        1000
+      ],
+      "buffer": "A"
+    },
+    {
+      "name": "reshape",
+      "op_index": 40,
+      "kind": "RESHAPE",
+      "input_tensor_ids": [
+        96
+      ],
+      "output_tensor_id": 97,
+      "output_shape": [
+        1,
+        1000
+      ],
+      "buffer": "A"
+    }
+  ]
+}

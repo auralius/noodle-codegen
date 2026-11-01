@@ -1,0 +1,45 @@
+{
+  "format": "noodle-studio-r15/v0.1",
+  "target": "uno",
+  "source": {
+    "name": "Small INT8 FCN example",
+    "type": "manual"
+  },
+  "storage": [
+    {
+      "name": "buffB",
+      "backend": "SRAM",
+      "path": "",
+      "shape": "1,16"
+    },
+    {
+      "name": "buffA",
+      "backend": "SRAM",
+      "path": "",
+      "shape": ""
+    },
+    {
+      "name": "out1",
+      "backend": "SD",
+      "path": "/out1.bin",
+      "shape": ""
+    }
+  ],
+  "layers": [
+    {
+      "name": "layer1",
+      "kind": "FCN",
+      "params": "PROGMEM",
+      "output_shape": "1,8",
+      "notes": "INT8 demo, actual weights not imported"
+    },
+    {
+      "name": "layer2",
+      "kind": "FCN",
+      "params": "SD",
+      "output_shape": "1,4",
+      "notes": "INT8 demo, actual weights not imported"
+    }
+  ],
+  "topology": "buffA = layer1(buffB);\nout1 = layer2(buffA);\n\n// destroy(buffA);  // optional explicit lifetime"
+}

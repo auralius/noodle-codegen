@@ -1,0 +1,67 @@
+{
+  "format": "noodle-studio-r15/v0.1",
+  "target": "esp32s3",
+  "source": {
+    "name": "SqueezeNet Fire module example",
+    "type": "manual"
+  },
+  "storage": [
+    {
+      "name": "x",
+      "backend": "PSRAM",
+      "path": "",
+      "shape": "1,55,55,128"
+    },
+    {
+      "name": "s",
+      "backend": "PSRAM",
+      "path": "",
+      "shape": ""
+    },
+    {
+      "name": "e1",
+      "backend": "PSRAM",
+      "path": "",
+      "shape": ""
+    },
+    {
+      "name": "e3",
+      "backend": "PSRAM",
+      "path": "",
+      "shape": ""
+    },
+    {
+      "name": "y",
+      "backend": "PSRAM",
+      "path": "",
+      "shape": ""
+    }
+  ],
+  "layers": [
+    {
+      "name": "squeeze",
+      "kind": "Conv2D",
+      "params": "XIP",
+      "output_shape": "1,55,55,16"
+    },
+    {
+      "name": "expand1",
+      "kind": "Conv2D",
+      "params": "XIP",
+      "output_shape": "1,55,55,64"
+    },
+    {
+      "name": "expand3",
+      "kind": "Conv2D",
+      "params": "XIP",
+      "output_shape": "1,55,55,64"
+    },
+    {
+      "name": "concat",
+      "kind": "Concat",
+      "params": "-",
+      "output_shape": "1,55,55,128"
+    }
+  ],
+  "topology": "s = squeeze(x);\ne1 = expand1(s);\ne3 = expand3(s);\ny = concat(e1, e3);\n\ndestroy(s);\ndestroy(e1);\ndestroy(e3);"
+}

@@ -1,0 +1,716 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Noodle Studio · R15 v0.6.2</title>
+  <link rel="stylesheet" href="studio.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="logo">N</span><div><b>Noodle Studio</b><small>R15 v0.6.2 · TFLite import · user-assembled layers</small></div></div>
+    <div class="righttools"><span class="phase">Offline · Uno INT8 · SD CNN experimental</span><button id="tfliteBtn">Import TFLite</button><button id="lenetPresetBtn" class="secondary" title="Explicitly configure the LeNet5 INT8 example for Uno SD activation/parameter streaming">Use Uno/SD LeNet-5 preset</button><button id="firmwareBtn">Generate Firmware ZIP</button><button id="importBtn" class="secondary">Open Project JSON</button><button id="exportBtn" class="secondary">Save Project JSON</button></div>
+  </header>
+  <main>
+    <div class="intro">
+      <div><h1>Import your model. Assemble your network.</h1><p>Start from an INT8 TFLite model, then choose buffers, parameter storage, and execution order. Save the complete project as JSON — including the original weights and quantization.</p></div>
+      <div class="examples"><label for="example">Start from example</label><select id="example"><option value="uno">Uno · INT8 FCN (illustrative)</option><option value="fire">ESP32-S3 · Fire branch</option><option value="lenet_int8">LeNet-5 · INT8 TFLite (experimental Uno)</option><option value="lenet_fp32">LeNet-5 · FP32 TFLite (preview)</option><option value="r14">ESP32-S3 · Import actual R14 graph</option></select></div>
+    </div>
+    <section class="model-panel panel" aria-label="Source model">
+      <div class="panelTitle"><div><div class="eyebrow">Model source · Local import</div><h2>Imported model and quantization</h2></div><span class="pill">TFL3 · INT8 first</span></div>
+      <div id="modelInfo" aria-live="polite"></div>
+      <p class="hint model-note">LeNet-5 INT8 uses a new experimental low-memory Noodle INT8 backend; only the validated fixed-shape LeNet5 model is accepted. The FP32 example remains an inspection preview. Importing a .tflite initializes the layer catalog and a starter topology. You can edit everything. Save Project JSON includes the original model bytes so no .tflite file is needed to reopen it.</p>
+    </section>
+    <div class="layout">
+      <div class="editors">
+        <section class="panel">
+          <div class="panelTitle"><div><div class="eyebrow">01 · Deployment target</div><h2>Board and capabilities</h2></div></div>
+          <div class="boardrow"><div><label for="board">Target board</label><select id="board"><option value="uno">Arduino Uno / Nano (ATmega328P)</option><option value="esp32s3">ESP32-S3 N16R8 (PSRAM + FFat)</option></select></div><div id="capabilities" class="capability"></div></div>
+          <p class="hint">Choices are never changed silently. On Uno/Nano, Codegen preallocates used SRAM tensors before SD initialization, reduces UART buffers to 32/16 bytes, and stores any Softmax lookup table in Flash rather than on the stack. Remove Softmax from the topology explicitly to classify by logits.</p>
+          <div class="deploy-settings" id="sdPinSettings"><span class="hint"><strong>Standard Uno / Nano SD wiring (fixed):</strong> CS = D10 &nbsp;·&nbsp; MOSI = D11 &nbsp;·&nbsp; MISO = D12 &nbsp;·&nbsp; SCK = D13 &nbsp;·&nbsp; GND = GND. Use a properly level-shifted, 5V-compatible SD module or 3.3V wiring. Codegen uses the board hardware SPI pins.</span></div>
+        </section>
+        <section class="panel">
+          <div class="panelTitle"><div><div class="eyebrow">02 · User-owned memory</div><h2>Buffers and files</h2></div><button class="secondary small" id="addBuffer">+ Add storage</button></div>
+          <p class="hint">A name such as <code>out1</code> can refer to <code>/out1.bin</code>. The file path is storage metadata; it isn't C++ syntax.</p>
+          <div class="table-scroll"><table class="editor-table" id="storageTable"><thead><tr><th>Name</th><th>Backend</th><th>File path (if applicable)</th><th>Optional shape</th><th></th></tr></thead><tbody></tbody></table></div>
+        </section>
+        <section class="panel">
+          <div class="panelTitle"><div><div class="eyebrow">03 · Generated layer bindings</div><h2>Layer catalog</h2></div><button class="secondary small" id="addLayer">+ Add layer</button></div>
+          <p class="hint">Weights, biases, fused activations and quantization are read from the imported TFLite. Parameter location is user-controlled and independent of activation storage. Editing topology does not alter the source weights.</p>
+          <div class="table-scroll"><table class="editor-table" id="layerTable"><thead><tr><th>Name</th><th>Operation</th><th>Parameters</th><th>Output shape</th><th></th></tr></thead><tbody></tbody></table></div>
+        </section>
+        <section class="panel">
+          <div class="panelTitle"><div><div class="eyebrow">04 · User controls the graph</div><h2>Topology</h2></div><span class="syntax">A = layer(B);</span></div>
+          <label class="codegen-option" for="pingPongOption"><input type="checkbox" id="pingPongOption"> Apply ping-pong for sequential network</label>
+          <p class="hint">Off by default. Only a strict linear chain is eligible; skip connections, branches, and explicit destroy calls keep the original buffers and code-generation path.</p>
+          <label for="topology" class="sr-only">Topology source</label><textarea id="topology" spellcheck="false" placeholder="buffA = layer1(buffB);\nout1 = layer2(buffA);"></textarea>
+          <div class="support"><span>Supported syntax: <code>output = layer(input);</code>, <code>out = concat(a, b);</code>, <code>destroy(buffer);</code>, <code>close(file);</code>.</span><span>No automatic reordering; optional sequential-only ping-pong</span></div>
+        </section>
+      </div>
+      <aside class="side">
+        <section class="panel preview">
+          <div class="panelTitle"><div><div class="eyebrow">Design checks</div><h2>Validation</h2></div><span id="validationBadge" class="status"></span></div>
+          <div id="validation"></div>
+        </section>
+        <section class="panel preview">
+          <div class="panelTitle"><div><div class="eyebrow">User execution sequence</div><h2>Connections</h2></div></div>
+          <div id="graph" class="graphlist"></div>
+        </section>
+        <section class="panel preview">
+          <div class="panelTitle"><div><div class="eyebrow">Codegen boundary</div><h2>Static C++ preview</h2></div><button class="secondary small" id="cppBtn">Save .cpp</button></div>
+          <p class="hint">This preview shows the explicit call order. Generate firmware for validated Uno FCNs or experimental fixed-shape LeNet-5 INT8 with SD activations. Unsupported backends or operators are rejected.</p>
+          <pre id="cppPreview"></pre><p id="generateStatus" class="generate-status" aria-live="polite">Generated firmware includes a generic binary serial sender for the model's input dimensions.</p>
+        </section>
+      </aside>
+    </div>
+    <footer>Noodle Studio R15 v0.6.4 · Offline import and self-contained JSON · Direct Noodle operators · Uno low-memory backend · No automatic graph planner</footer>
+  </main>
+  <input id="tfliteFile" type="file" accept=".tflite,application/octet-stream" hidden>
+  <input id="importFile" type="file" accept=".json,application/json" hidden>
+  <script type="application/json" id="r14Bundled">{
+  "model_sha256": "f4088a35cdca497b0987a324a662c24995b295b466d9fc6ff625ce6def7a2652",
+  "backend": "esp32s3_psram_fp32_six_buffers",
+  "steps": [
+    {
+      "name": "conv1",
+      "op_index": 2,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        58
+      ],
+      "output_tensor_id": 59,
+      "output_shape": [
+        1,
+        111,
+        111,
+        64
+      ],
+      "buffer": "A"
+    },
+    {
+      "name": "pool1",
+      "op_index": 3,
+      "kind": "MAX_POOL_2D",
+      "input_tensor_ids": [
+        59
+      ],
+      "output_tensor_id": 60,
+      "output_shape": [
+        1,
+        55,
+        55,
+        64
+      ],
+      "buffer": "B"
+    },
+    {
+      "name": "fire2_squeeze",
+      "op_index": 4,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        60
+      ],
+      "output_tensor_id": 61,
+      "output_shape": [
+        1,
+        55,
+        55,
+        16
+      ],
+      "buffer": "S"
+    },
+    {
+      "name": "fire2_expand1",
+      "op_index": 5,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        61
+      ],
+      "output_tensor_id": 62,
+      "output_shape": [
+        1,
+        55,
+        55,
+        64
+      ],
+      "buffer": "E1"
+    },
+    {
+      "name": "fire2_expand3",
+      "op_index": 6,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        61
+      ],
+      "output_tensor_id": 63,
+      "output_shape": [
+        1,
+        55,
+        55,
+        64
+      ],
+      "buffer": "E3"
+    },
+    {
+      "name": "fire2_concat",
+      "op_index": 7,
+      "kind": "CONCATENATION",
+      "input_tensor_ids": [
+        62,
+        63
+      ],
+      "output_tensor_id": 64,
+      "output_shape": [
+        1,
+        55,
+        55,
+        128
+      ],
+      "buffer": "A"
+    },
+    {
+      "name": "fire3_squeeze",
+      "op_index": 8,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        64
+      ],
+      "output_tensor_id": 65,
+      "output_shape": [
+        1,
+        55,
+        55,
+        16
+      ],
+      "buffer": "S"
+    },
+    {
+      "name": "fire3_expand1",
+      "op_index": 9,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        65
+      ],
+      "output_tensor_id": 66,
+      "output_shape": [
+        1,
+        55,
+        55,
+        64
+      ],
+      "buffer": "E1"
+    },
+    {
+      "name": "fire3_expand3",
+      "op_index": 10,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        65
+      ],
+      "output_tensor_id": 67,
+      "output_shape": [
+        1,
+        55,
+        55,
+        64
+      ],
+      "buffer": "E3"
+    },
+    {
+      "name": "fire3_concat",
+      "op_index": 11,
+      "kind": "CONCATENATION",
+      "input_tensor_ids": [
+        66,
+        67
+      ],
+      "output_tensor_id": 68,
+      "output_shape": [
+        1,
+        55,
+        55,
+        128
+      ],
+      "buffer": "B"
+    },
+    {
+      "name": "pool2",
+      "op_index": 12,
+      "kind": "MAX_POOL_2D",
+      "input_tensor_ids": [
+        68
+      ],
+      "output_tensor_id": 69,
+      "output_shape": [
+        1,
+        27,
+        27,
+        128
+      ],
+      "buffer": "A"
+    },
+    {
+      "name": "fire4_squeeze",
+      "op_index": 13,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        69
+      ],
+      "output_tensor_id": 70,
+      "output_shape": [
+        1,
+        27,
+        27,
+        32
+      ],
+      "buffer": "S"
+    },
+    {
+      "name": "fire4_expand1",
+      "op_index": 14,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        70
+      ],
+      "output_tensor_id": 71,
+      "output_shape": [
+        1,
+        27,
+        27,
+        128
+      ],
+      "buffer": "E1"
+    },
+    {
+      "name": "fire4_expand3",
+      "op_index": 15,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        70
+      ],
+      "output_tensor_id": 72,
+      "output_shape": [
+        1,
+        27,
+        27,
+        128
+      ],
+      "buffer": "E3"
+    },
+    {
+      "name": "fire4_concat",
+      "op_index": 16,
+      "kind": "CONCATENATION",
+      "input_tensor_ids": [
+        71,
+        72
+      ],
+      "output_tensor_id": 73,
+      "output_shape": [
+        1,
+        27,
+        27,
+        256
+      ],
+      "buffer": "B"
+    },
+    {
+      "name": "fire5_squeeze",
+      "op_index": 17,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        73
+      ],
+      "output_tensor_id": 74,
+      "output_shape": [
+        1,
+        27,
+        27,
+        32
+      ],
+      "buffer": "S"
+    },
+    {
+      "name": "fire5_expand1",
+      "op_index": 18,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        74
+      ],
+      "output_tensor_id": 75,
+      "output_shape": [
+        1,
+        27,
+        27,
+        128
+      ],
+      "buffer": "E1"
+    },
+    {
+      "name": "fire5_expand3",
+      "op_index": 19,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        74
+      ],
+      "output_tensor_id": 76,
+      "output_shape": [
+        1,
+        27,
+        27,
+        128
+      ],
+      "buffer": "E3"
+    },
+    {
+      "name": "fire5_concat",
+      "op_index": 20,
+      "kind": "CONCATENATION",
+      "input_tensor_ids": [
+        75,
+        76
+      ],
+      "output_tensor_id": 77,
+      "output_shape": [
+        1,
+        27,
+        27,
+        256
+      ],
+      "buffer": "A"
+    },
+    {
+      "name": "pool3",
+      "op_index": 21,
+      "kind": "MAX_POOL_2D",
+      "input_tensor_ids": [
+        77
+      ],
+      "output_tensor_id": 78,
+      "output_shape": [
+        1,
+        13,
+        13,
+        256
+      ],
+      "buffer": "B"
+    },
+    {
+      "name": "fire6_squeeze",
+      "op_index": 22,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        78
+      ],
+      "output_tensor_id": 79,
+      "output_shape": [
+        1,
+        13,
+        13,
+        48
+      ],
+      "buffer": "S"
+    },
+    {
+      "name": "fire6_expand1",
+      "op_index": 23,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        79
+      ],
+      "output_tensor_id": 80,
+      "output_shape": [
+        1,
+        13,
+        13,
+        192
+      ],
+      "buffer": "E1"
+    },
+    {
+      "name": "fire6_expand3",
+      "op_index": 24,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        79
+      ],
+      "output_tensor_id": 81,
+      "output_shape": [
+        1,
+        13,
+        13,
+        192
+      ],
+      "buffer": "E3"
+    },
+    {
+      "name": "fire6_concat",
+      "op_index": 25,
+      "kind": "CONCATENATION",
+      "input_tensor_ids": [
+        80,
+        81
+      ],
+      "output_tensor_id": 82,
+      "output_shape": [
+        1,
+        13,
+        13,
+        384
+      ],
+      "buffer": "A"
+    },
+    {
+      "name": "fire7_squeeze",
+      "op_index": 26,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        82
+      ],
+      "output_tensor_id": 83,
+      "output_shape": [
+        1,
+        13,
+        13,
+        48
+      ],
+      "buffer": "S"
+    },
+    {
+      "name": "fire7_expand1",
+      "op_index": 27,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        83
+      ],
+      "output_tensor_id": 84,
+      "output_shape": [
+        1,
+        13,
+        13,
+        192
+      ],
+      "buffer": "E1"
+    },
+    {
+      "name": "fire7_expand3",
+      "op_index": 28,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        83
+      ],
+      "output_tensor_id": 85,
+      "output_shape": [
+        1,
+        13,
+        13,
+        192
+      ],
+      "buffer": "E3"
+    },
+    {
+      "name": "fire7_concat",
+      "op_index": 29,
+      "kind": "CONCATENATION",
+      "input_tensor_ids": [
+        84,
+        85
+      ],
+      "output_tensor_id": 86,
+      "output_shape": [
+        1,
+        13,
+        13,
+        384
+      ],
+      "buffer": "B"
+    },
+    {
+      "name": "fire8_squeeze",
+      "op_index": 30,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        86
+      ],
+      "output_tensor_id": 87,
+      "output_shape": [
+        1,
+        13,
+        13,
+        64
+      ],
+      "buffer": "S"
+    },
+    {
+      "name": "fire8_expand1",
+      "op_index": 31,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        87
+      ],
+      "output_tensor_id": 88,
+      "output_shape": [
+        1,
+        13,
+        13,
+        256
+      ],
+      "buffer": "E1"
+    },
+    {
+      "name": "fire8_expand3",
+      "op_index": 32,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        87
+      ],
+      "output_tensor_id": 89,
+      "output_shape": [
+        1,
+        13,
+        13,
+        256
+      ],
+      "buffer": "E3"
+    },
+    {
+      "name": "fire8_concat",
+      "op_index": 33,
+      "kind": "CONCATENATION",
+      "input_tensor_ids": [
+        88,
+        89
+      ],
+      "output_tensor_id": 90,
+      "output_shape": [
+        1,
+        13,
+        13,
+        512
+      ],
+      "buffer": "A"
+    },
+    {
+      "name": "fire9_squeeze",
+      "op_index": 34,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        90
+      ],
+      "output_tensor_id": 91,
+      "output_shape": [
+        1,
+        13,
+        13,
+        64
+      ],
+      "buffer": "S"
+    },
+    {
+      "name": "fire9_expand1",
+      "op_index": 35,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        91
+      ],
+      "output_tensor_id": 92,
+      "output_shape": [
+        1,
+        13,
+        13,
+        256
+      ],
+      "buffer": "E1"
+    },
+    {
+      "name": "fire9_expand3",
+      "op_index": 36,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        91
+      ],
+      "output_tensor_id": 93,
+      "output_shape": [
+        1,
+        13,
+        13,
+        256
+      ],
+      "buffer": "E3"
+    },
+    {
+      "name": "fire9_concat",
+      "op_index": 37,
+      "kind": "CONCATENATION",
+      "input_tensor_ids": [
+        92,
+        93
+      ],
+      "output_tensor_id": 94,
+      "output_shape": [
+        1,
+        13,
+        13,
+        512
+      ],
+      "buffer": "B"
+    },
+    {
+      "name": "final_conv",
+      "op_index": 38,
+      "kind": "CONV_2D",
+      "input_tensor_ids": [
+        94
+      ],
+      "output_tensor_id": 95,
+      "output_shape": [
+        1,
+        13,
+        13,
+        1000
+      ],
+      "buffer": "A"
+    },
+    {
+      "name": "gap",
+      "op_index": 39,
+      "kind": "MEAN",
+      "input_tensor_ids": [
+        95
+      ],
+      "output_tensor_id": 96,
+      "output_shape": [
+        1,
+        1,
+        1,
+        1000
+      ],
+      "buffer": "A"
+    },
+    {
+      "name": "reshape",
+      "op_index": 40,
+      "kind": "RESHAPE",
+      "input_tensor_ids": [
+        96
+      ],
+      "output_tensor_id": 97,
+      "output_shape": [
+        1,
+        1000
+      ],
+      "buffer": "A"
+    }
+  ]
+}
+</script>
+  <script src="tflite_import.js"></script>
+  <script src="noodle_bundle.js"></script>
+  <script src="serial_sender_bundle.js"></script>
+  <script src="bare_uart_bundle.js"></script>
+  <script src="firmware_codegen.js"></script>
+  <script src="lenet5_examples.js"></script>
+  <script src="lenet_uno_codegen.js"></script>
+  <script src="studio.js"></script>
+</body>
+</html>
