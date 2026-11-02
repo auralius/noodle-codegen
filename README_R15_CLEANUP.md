@@ -1,4 +1,4 @@
-# R15 v0.6.4 — Noodle/codegen cleanup + opt-in ping-pong
+# R15 v0.6.5 — Noodle/codegen cleanup + opt-in ping-pong
 
 This revision is based on the supplied latest working LeNet-5 firmware and the supplied Noodle Studio GUI.
 

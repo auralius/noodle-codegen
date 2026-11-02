@@ -1019,8 +1019,10 @@ static uint16_t q_avr_flat_file(NoodleTensor *input,NoodleTensor *out){
   }
   return noodle_i8_tensor_file_1d(out,(uint16_t)n,1,input->scale,input->zero_point)?(uint16_t)n:0;
 }
-// Packed FCN with file- or SRAM-backed inputs, one SD handle at any time.
-// This uses caller-provided scratch and Noodle's quantized output path.
+// AVR INT8 FCN: stream output-major weights in one continuous pass.
+// An auxiliary file handle is reused for the input and packed metadata.
+// Both handles share the filesystem sector cache; no new tensor allocation.
+// Noodle operators never print to UART.
 static uint16_t q_avr_packed_fcn(NoodleTensor *input,const FCNFile &l,NoodleTensor *out){
   if(!input||!out||input==out||!l.metadata_fn||!l.weight_fn||!l.O||
      !q_avr_io||!q_avr_io_bytes||
@@ -1029,40 +1031,55 @@ static uint16_t q_avr_packed_fcn(NoodleTensor *input,const FCNFile &l,NoodleTens
   if(!n||(input->file_path && input->rank!=NOODLE_TENSOR_1D))return 0;
   int8_t *dst=noodle_i8_tensor_require_vector(out,l.O,l.output_scale,l.output_zero_point);
   if(!dst)return 0;
-  NDL_File f;
-  for(uint16_t oc=0;oc<l.O;++oc){
+  // Weights are already output-major in the exported binary: [O][N].
+  // A continuous read of weights eliminates all per-neuron/block weight seeks.
+  NDL_File weights;
+  NDL_File auxiliary;
+  if (!noodle_fs_open_read_into(weights,l.weight_fn)) return 0;
+  for (uint16_t oc=0;oc<l.O;++oc) {
     int32_t dot=0;
-    if(input->file_path){
-      for(uint16_t base=0;base<n;base+=q_avr_io_bytes){
-        uint8_t size=(n-base<q_avr_io_bytes)?(uint8_t)(n-base):q_avr_io_bytes;
-        if(!q_avr_read_at(f,input->file_path,base,q_avr_io,size))return 0;
-        if(!noodle_fs_open_read_into(f,l.weight_fn))return 0;
-        if(!q_avr_seek(f,(uint32_t)oc*n+base)){f.close();return 0;}
-        bool ok=true;
-        for(uint8_t k=0;k<size;++k){
-          int w=f.read();if(w<0){ok=false;break;}
-          dot+=((int32_t)(int8_t)q_avr_io[k]-l.input_zero_point)*(int8_t)(uint8_t)w;
-        }
-        f.close();if(!ok)return 0;
+    if (input->file_path) {
+      // Rewind by reopening once for each output neuron, not each block.
+      if (!noodle_fs_open_read_into(auxiliary,input->file_path)) {
+        weights.close(); return 0;
       }
-    }else{
-      if(!input->buffer.data)return 0;
-      if(!noodle_fs_open_read_into(f,l.weight_fn))return 0;
-      if(!q_avr_seek(f,(uint32_t)oc*n)){f.close();return 0;}
       bool ok=true;
-      for(uint16_t k=0;k<n;++k){
-        const int w=f.read();if(w<0){ok=false;break;}
-        dot+=((int32_t)input->buffer.data[k]-l.input_zero_point)*(int8_t)(uint8_t)w;
+      for (uint16_t base=0;base<n && ok;base+=q_avr_io_bytes) {
+        const uint8_t count=(n-base<q_avr_io_bytes)?(uint8_t)(n-base):q_avr_io_bytes;
+        if (noodle_read_raw(auxiliary,q_avr_io,count)!=count) {ok=false;break;}
+        for (uint8_t k=0;k<count;++k) {
+          const int w=weights.read();
+          if (w<0) {ok=false;break;}
+          dot+=((int32_t)(int8_t)q_avr_io[k]-l.input_zero_point)*
+               (int8_t)(uint8_t)w;
+        }
       }
-      f.close();if(!ok)return 0;
+      auxiliary.close();
+      if (!ok) {weights.close();return 0;}
+    } else {
+      if (!input->buffer.data) {weights.close();return 0;}
+      bool ok=true;
+      for (uint16_t k=0;k<n;++k) {
+        const int w=weights.read();
+        if (w<0) {ok=false;break;}
+        dot+=((int32_t)input->buffer.data[k]-l.input_zero_point)*
+             (int8_t)(uint8_t)w;
+      }
+      if (!ok) {weights.close();return 0;}
     }
+    // Auxiliary is closed after input streaming and can open packed metadata.
     uint8_t record[12];
-    if(!q_avr_read_at(f,l.metadata_fn,(uint32_t)oc*12u,record,12))return 0;
-    int64_t sum=(int64_t)dot+q_avr_le32(record);
-    int32_t acc=sum>INT32_MAX?INT32_MAX:(sum<INT32_MIN?INT32_MIN:(int32_t)sum);
-    dst[oc]=(int8_t)q_apply_output(acc,q_avr_le32(record+4),q_avr_le32(record+8),
-                       l.output_zero_point,l.activation_min,l.activation_max);
+    if (!q_avr_read_at(auxiliary,l.metadata_fn,(uint32_t)oc*12u,record,12)) {
+      weights.close();return 0;
+    }
+    const int64_t sum=(int64_t)dot+q_avr_le32(record);
+    const int32_t acc=sum>INT32_MAX?INT32_MAX:
+                      (sum<INT32_MIN?INT32_MIN:(int32_t)sum);
+    dst[oc]=(int8_t)q_apply_output(acc,q_avr_le32(record+4),
+                q_avr_le32(record+8),l.output_zero_point,
+                l.activation_min,l.activation_max);
   }
+  weights.close();
   return l.O;
 }
 #else

@@ -1,5 +1,5 @@
 // R15 v0.6.2 Noodle-runtime-first LeNet5 on Uno - EXPERIMENTAL
-// Static topology. All arithmetic uses noodle_i8_* operators (single SdFat handle).
+// Static topology. All arithmetic uses noodle_i8_* operators (sequential SD-backed FCN weights).
 // SD inputs and outputs are preallocated at Codegen export time.
 // Generated from the original TFLite INT8 weights and quantization metadata.
 #include <Arduino.h>
@@ -108,37 +108,62 @@ static bool receive_input(NDL_File &f){
   return true;
 }
 
+// Application-only stage profiling (enable with -D NOODLE_APP_LAYER_TIMING=1).
+#if defined(NOODLE_APP_LAYER_TIMING) && NOODLE_APP_LAYER_TIMING
+static unsigned long r15_stage_started;
+#define R15_STAGE_TIC() do {r15_stage_started=millis();} while(0)
+#define R15_STAGE_TOC(label) do { \
+  Serial.print(F("TIME " label " ")); \
+  Serial.println(millis()-r15_stage_started); \
+} while(0)
+#else
+#define R15_STAGE_TIC() do {} while(0)
+#define R15_STAGE_TOC(label) do {} while(0)
+#endif
+
 static bool run_user_topology(){
   // SD: in.bin (A) -> p1.bin (B) -> p2.bin (A) -> flat.bin (B).
   // File names differ for every operation, but only two descriptors exist.
   if(!noodle_i8_tensor_bind_file(&tensor_b,"@@PATH_POOL1@@")) return false;
   Serial.println(F("STAGE CONV1_POOL1"));
   bind_conv1();
+  R15_STAGE_TIC();
   if (noodle_i8_conv2d_fused(&tensor_a,conv_cfg,mean_pool,&tensor_b)!=14)return false;
+  R15_STAGE_TOC("CONV1_POOL1");
   if(!noodle_i8_tensor_bind_file(&tensor_a,"@@PATH_POOL2@@")) return false;
   Serial.println(F("STAGE CONV2_POOL2"));
   bind_conv2();
+  R15_STAGE_TIC();
   if (noodle_i8_conv2d_fused(&tensor_b,conv_cfg,mean_pool,&tensor_a)!=5)return false;
+  R15_STAGE_TOC("CONV2_POOL2");
   if(!noodle_i8_tensor_bind_file(&tensor_b,"@@PATH_RESHAPE@@")) return false;
   Serial.println(F("STAGE RESHAPE"));
+  R15_STAGE_TIC();
   if (noodle_i8_flat_file(&tensor_a,&tensor_b)!=400)return false;
 
+  R15_STAGE_TOC("RESHAPE");
   // The last SD input remains live in tensor_b during FC1. Tensor_a is dead,
   // so rebind it to the 150-byte Conv filter, now free to serve as SRAM output.
   r15_bind_scratch(tensor_a,r15_filter,sizeof(r15_filter),120,@@H1_SCALE@@f,@@H1_ZP@@);
   Serial.println(F("STAGE FC1"));
   bind_fc1();
+  R15_STAGE_TIC();
   if (noodle_i8_fcn(&tensor_b,fcn_cfg,&tensor_a)!=120)return false;
 
+  R15_STAGE_TOC("FC1");
   // The flattened SD input is dead after FC1. Rebind tensor_b to hidden84.
   r15_bind_scratch(tensor_b,r15_hidden84,sizeof(r15_hidden84),84,@@H2_SCALE@@f,@@H2_ZP@@);
   Serial.println(F("STAGE FC2"));
   bind_fc2();
+  R15_STAGE_TIC();
   if (noodle_i8_fcn(&tensor_a,fcn_cfg,&tensor_b)!=84)return false;
-  Serial.println(F("STAGE FC3"));
+  
+  R15_STAGE_TOC("FC2");Serial.println(F("STAGE FC3"));
   bind_fc3();
+  R15_STAGE_TIC();
   if (noodle_i8_fcn(&tensor_b,fcn_cfg,&tensor_a)!=10)return false;
-  Serial.println(F("STAGE SOFTMAX"));
+  
+  R15_STAGE_TOC("FC3");Serial.println(F("STAGE SOFTMAX"));
   @@SOFTMAX_EXEC@@
 }
 void setup(){
