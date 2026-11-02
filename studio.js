@@ -17,10 +17,11 @@ const BOARD = {
     tags: ['8 MiB PSRAM', '16 MiB Flash', 'FFat partition', 'XIP']
   }
 };
-const OPERATIONS = ['FCN', 'Conv2D', 'DepthwiseConv2D', 'PointwiseConv2D', 'MaxPool', 'AvgPool', 'Concat', 'Add', 'ReLU', 'HybridBlock', 'GAP', 'Reshape', 'Softmax', 'SOFTMAX', 'FULLY_CONNECTED', 'CONV_2D', 'MAX_POOL_2D', 'AVERAGE_POOL_2D', 'CONCATENATION', 'MEAN', 'RESHAPE'];
-const NONPARAM = new Set(['MaxPool','AvgPool','Concat','Add','ReLU','GAP','Reshape','MAX_POOL_2D','AVERAGE_POOL_2D','CONCATENATION','MEAN','RESHAPE','Softmax','SOFTMAX']);
+const OPERATIONS = ['FCN', 'Conv2D', 'DepthwiseConv2D', 'PointwiseConv2D', 'MaxPool', 'AvgPool', 'Concat', 'Add', 'ReLU', 'HybridBlock', 'GAP', 'Reshape', 'Softmax', 'SOFTMAX', 'FULLY_CONNECTED', 'CONV_2D', 'MAX_POOL_2D', 'AVERAGE_POOL_2D', 'CONCATENATION', 'MEAN', 'RESHAPE', 'QUANTIZE', 'SUB', 'MUL'];
+const NONPARAM = new Set(['MaxPool','AvgPool','Concat','Add','ReLU','GAP','Reshape','MAX_POOL_2D','AVERAGE_POOL_2D','CONCATENATION','MEAN','RESHAPE','Softmax','SOFTMAX','QUANTIZE']);
 const RESERVED = new Set(['destroy', 'close']);
 const TFLITE = (typeof NoodleTFLite !== 'undefined') ? NoodleTFLite : null;
+const SEQUENTIAL = (typeof NoodleSequentialNetwork !== 'undefined') ? NoodleSequentialNetwork : null;
 let state;
 const $ = id => document.getElementById(id);
 const copy = x => JSON.parse(JSON.stringify(x));
@@ -109,7 +110,7 @@ function suggestLabel(op,counts){
 function fromTFLiteModel(model, filename, bytes, hash) {
   if(!model.inputs.length||!model.outputs.length||!model.operators.length) throw new Error('TFLite has no usable input, output, or operators.');
   const dataInputs=model.inputs.map(i=>model.tensors[i]);
-  if(dataInputs.some(t=>!['INT8','FLOAT32'].includes(t.dtype)))throw new Error('R15 imports INT8 or FLOAT32 model inputs for inspection. This model has input types: '+dataInputs.map(t=>t.dtype).join(', '));
+  if(dataInputs.some(t=>!['INT8','UINT8','FLOAT32'].includes(t.dtype)))throw new Error('R15 imports INT8, UINT8, or FLOAT32 model inputs for inspection. This model has input types: '+dataInputs.map(t=>t.dtype).join(', '));
   const opTypes=model.operators.map(o=>o.op);
   const isFCOps=opTypes.every(n=>['FULLY_CONNECTED','SOFTMAX','RESHAPE','RELU'].includes(n));
   const target=isFCOps && dataInputs.every(t=>t.dtype==='INT8')?'uno':'esp32s3';
@@ -135,7 +136,7 @@ function fromTFLiteModel(model, filename, bytes, hash) {
     const src=active.map(i=>addTensor(i,'input_'+i));
     const p=op.parameter_tensors.map(i=>{const t=model.tensors[i];return {id:i,shape:t.shape,dtype:t.dtype,bytes:t.parameter_bytes,quantization:copy(t.quantization)};});
     layers.push({name,kind:op.op==='FULLY_CONNECTED'?'FCN':op.op==='SOFTMAX'?'Softmax':op.op,params:NONPARAM.has(op.op)?'-':op.parameter_tensors.length?paramBackend:'-',
-      input_shape:src.length===1?(model.tensors[active[0]].shape.join(',')):'',output_shape:model.tensors[op.outputs[0]].shape.join(','),
+      ...(src.length===1?{input_shape:model.tensors[active[0]].shape.join(',')}:{}),output_shape:model.tensors[op.outputs[0]].shape.join(','),
       op_index:op.id,parameter_tensors:p,op_options:copy(op.config),notes:'Imported TFLite '+op.op+' v'+op.version+(op.config.activation?', '+op.config.activation:'')});
     calls.push(`${dst} = ${name}(${src.join(', ')});`);
   }
@@ -144,9 +145,54 @@ function fromTFLiteModel(model, filename, bytes, hash) {
   return {format:NS_FORMAT,target,source:{name:filename,type:'tflite',file:filename,model_sha256:hash,
       model_size_bytes:bytes.length,model_base64:TFLITE.base64Encode(bytes),
       schema_version:model.schema_version,inputs:model.inputs,outputs:model.outputs,
-      tensors:copy(model.tensors),operators:copy(model.operators),warnings:otherDtypes.length?['Contains '+otherDtypes.length+' non-INT8/INT32 constant tensors.']:[]},
+      tensors:copy(model.tensors),operators:copy(model.operators),warnings:[
+        ...(otherDtypes.length?['Contains '+otherDtypes.length+' non-INT8/INT32 constant tensors; preserved in the embedded TFLite model.']:[])
+      ]},
     storage,layers,topology:calls.join('\n')};
 }
+// Firmware export is deliberately narrower than TFLite import/inspection.
+// Do not infer a supported exporter from the selected board or input dtype alone.
+const LENET5_INT8_SHA='0c89db896852c0d69eb7be4e15fdd3981015247f0ed57ca666d8feb6e21c5073';
+const S3_INT8_OPS=new Set(['CONV_2D','MAX_POOL_2D','CONCATENATION','QUANTIZE','SUB','MUL','MEAN','RESHAPE']);
+const S3_FP32_OPS=new Set(['SUB','MUL','CONV_2D','MAX_POOL_2D','AVERAGE_POOL_2D','CONCATENATION','MEAN','RESHAPE','FULLY_CONNECTED','SOFTMAX']);
+const UNO_FCN_OPS=new Set(['FULLY_CONNECTED','SOFTMAX']);
+function firmwareCompatibility(project){
+  const src=project?.source||{};
+  const no=(reason,detail='')=>({supported:false,backend:null,reason,detail});
+  if(src.type!=='tflite'||!src.model_base64) return no('Firmware export requires a TFLite model with embedded parameters. The example/topology preview is not executable firmware.');
+  const ops=src.operators||[],tensors=src.tensors||[],inputs=src.inputs||[],outputs=src.outputs||[];
+  if(inputs.length!==1||outputs.length!==1) return no('Current exporters require exactly one model input and one output.');
+  const input=tensors[inputs[0]],output=tensors[outputs[0]];
+  if(!input||!output||!ops.length) return no('Missing TFLite tensor or operator metadata. Re-import the original model.');
+  const shape=(input.shape||[]).join(',');
+  const signature=`Input: ${input.dtype} [${shape}], output: ${output.dtype}; ${ops.length} operators.`;
+  const unsupported=(allow)=>{
+    const counts={};for(const o of ops){if(!allow.has(o.op))counts[o.op]=(counts[o.op]||0)+1;}
+    return Object.entries(counts).map(([kind,n])=>kind+' × '+n).join(', ');
+  };
+  if(project.target==='uno'){
+    if(src.model_sha256===LENET5_INT8_SHA && input.dtype==='INT8')
+      return {supported:true,backend:'uno_lenet5',reason:'Supported: LeNet-5 INT8 Uno/SD exporter.',detail:signature};
+    if(input.dtype==='INT8' && ops.every(o=>UNO_FCN_OPS.has(o.op)) && ops.some(o=>o.op==='FULLY_CONNECTED'))
+      return {supported:true,backend:'uno_fcn',reason:'FCN-only Uno exporter available; quantization, storage, and topology are checked during generation.',detail:signature};
+    return no('Uno firmware currently supports the validated LeNet-5 INT8 model or FCN-only INT8 graphs.',signature+(unsupported(UNO_FCN_OPS)?' Unsupported on the generic Uno FCN path: '+unsupported(UNO_FCN_OPS)+'.':''));
+  }
+  if(project.target==='esp32s3'){
+    const standardShape=shape==='1,224,224,3';
+    if(standardShape&&input.dtype==='UINT8'&&output.dtype==='UINT8'&&ops.length===43&&ops.every(o=>S3_INT8_OPS.has(o.op)))
+      return {supported:true,backend:'s3_int8',reason:'Compatible with the ESP32-S3 SqueezeNet-class INT8 exporter; graph/storage checks apply.',detail:signature};
+    if(standardShape&&input.dtype==='FLOAT32'&&output.dtype==='FLOAT32'&&ops.length===41&&ops.every(o=>S3_FP32_OPS.has(o.op)))
+      return {supported:true,backend:'s3_fp32',reason:'Compatible with the ESP32-S3 SqueezeNet-class FP32 exporter; graph/storage checks apply.',detail:signature};
+    if(input.dtype==='FLOAT32'&&output.dtype==='FLOAT32'&&ops.every(o=>S3_FP32_OPS.has(o.op)))
+      return {supported:true,backend:'s3_fp32_generic',reason:'Experimental operator-driven ESP32-S3 FP32 exporter available; options/shape/storage validated during generation.',detail:signature};
+    const extra=unsupported(input.dtype==='FLOAT32'?S3_FP32_OPS:S3_INT8_OPS);
+    const details=[signature,extra?'Missing ESP32-S3 export bindings for operators: '+extra+'.':'',
+      'ESP32-S3 generic FP32 currently supports Conv2D, AveragePool2D, MaxPool2D, FCN, Softmax, Reshape, and selected SqueezeNet operators; additional INT8 families are not implemented.'].filter(Boolean).join(' ');
+    return no('TFLite imported for inspection, but no ESP32-S3 firmware exporter supports this graph yet.',details);
+  }
+  return no('No firmware exporter is registered for the selected board.');
+}
+
 function shapeTokens(s) {
   const str = String(s||'').trim(); if (!str) return null;
   const items = str.split(',').map(x=>x.trim());
@@ -173,8 +219,10 @@ function validate(project) {
   const caps=BOARD[project.target];
   if(project.source?.type==='tflite'&&!project.source.model_base64) errors.push('TFLite model binary missing. Re-import original .tflite to retain weights and biases.');
   if(project.source?.type==='tflite'&&project.source.warnings)warnings.push(...project.source.warnings);
-  if(project.source?.type==='tflite' && project.source.inputs?.some(i=>project.source.tensors?.[i]?.dtype==='FLOAT32'))warnings.push('FP32 model: editable topology/metadata preview only; the current firmware exporter supports INT8 FCNs on Uno/Nano.');
-  if(project.source?.type==='tflite' && project.target==='esp32s3')warnings.push('ESP32-S3 target is available for topology design; MCU firmware export is not implemented by the current Uno-only Codegen.');
+  const currentExport=firmwareCompatibility(project);
+  if(currentExport.backend==='s3_int8') warnings.push('ESP32-S3 UINT8/W8A8 SqueezeNet-family exporter: PSRAM activations and XIP parameters; numerical equivalence should be validated.');
+  if(currentExport.backend==='s3_fp32_generic') warnings.push('Generic ESP32-S3 FP32 exporter is experimental; only supported operator options and PSRAM/XIP paths are generated.');
+  if(currentExport.backend==='s3_fp32') warnings.push('ESP32-S3 FP32 SqueezeNet-family exporter: experimental; PSRAM activations and XIP parameters.');
   const bufferNames=new Set(),layerNames=new Set(),byBuffer = new Map(),byLayer=new Map();
   for (const b of project.storage) {
     if(!IDENT.test(b.name)) errors.push(`Storage name “${b.name}” must be a valid C++ identifier.`);
@@ -193,7 +241,7 @@ function validate(project) {
     if(!NONPARAM.has(l.kind) && !caps.params.includes(l.params)) errors.push(`Layer ${l.name}: parameter backend ${l.params} is unsupported on ${caps.label}.`);
     if(shapeTokens(l.output_shape)===false) errors.push(`Layer ${l.name}: invalid output shape “${l.output_shape}”.`);
     if(l.kind==='HybridBlock') warnings.push(`${l.name}: custom HybridBlock requires a user-provided kernel binding.`);
-    if(project.source?.type==='tflite'&&!['FCN','Softmax'].includes(l.kind) && !(project.target==='uno'&&project.source?.model_sha256==='0c89db896852c0d69eb7be4e15fdd3981015247f0ed57ca666d8feb6e21c5073'))warnings.push(`${l.name}: ${l.kind} imported for topology preview; only fixed-shape LeNet5 INT8 CNN has an experimental Uno export.`);
+    if(project.source?.type==='tflite' && project.target==='uno' && !['FCN','Softmax'].includes(l.kind) && project.source?.model_sha256!=='0c89db896852c0d69eb7be4e15fdd3981015247f0ed57ca666d8feb6e21c5073')warnings.push(`${l.name}: ${l.kind} imported for topology preview; only fixed-shape LeNet5 INT8 CNN has an experimental Uno export.`);
   }
   const parsed = parseTopology(project.topology);errors.push(...parsed.errors);
   const knownShapes = new Map(project.storage.map(b=>[b.name,shapeTokens(b.shape)||null]));
@@ -289,9 +337,47 @@ function renderModelInfo(){
   info.innerHTML=`<div class="model-stats"><span><b>${textEscape(source.name)}</b></span><span>${textEscape(modelSize.toLocaleString())} bytes</span><span>${(source.operators||[]).length} operations</span><span>${quant} quantized tensors</span><span>${source.model_base64?'Embedded weights ✓':'⚠ Model missing'}</span></div>
     <div class="model-sha">SHA256: <code>${textEscape(source.model_sha256||'unavailable (browser crypto)')}</code></div>
     <div class="model-oplist">${Object.entries(counts).map(([k,v])=>`<span class="pill">${textEscape(k)} × ${v}</span>`).join('')}</div>
+    <div class="model-export-notice ${firmwareCompatibility(state).supported?'export-supported':'export-unsupported'}" role="status"><b>${firmwareCompatibility(state).supported?'Firmware export available':'Inspection only — firmware export unavailable'}</b><span>${textEscape(firmwareCompatibility(state).reason)} ${textEscape(firmwareCompatibility(state).detail||'')}</span></div>
     <details class="model-details"><summary>Inspect quantization and parameter metadata</summary><div class="model-tensor-scroll"><table><thead><tr><th>Tensor</th><th>Shape</th><th>Type</th><th>Scale(s)</th><th>Zero point(s)</th><th>Bytes</th></tr></thead><tbody>${(source.tensors||[]).map(t=>`<tr><td title="${textEscape(t.name)}">${t.id} · ${textEscape(t.name)}</td><td>${textEscape(t.shape.join('×'))}</td><td>${textEscape(t.dtype)}</td><td>${(t.quantization?.scales||[]).length}${(t.quantization?.scales||[]).length===1?' ('+textEscape(t.quantization.scales[0])+')':''}</td><td>${(t.quantization?.zero_points||[]).length}${(t.quantization?.zero_points||[]).length===1?' ('+textEscape(t.quantization.zero_points[0])+')':''}</td><td>${t.parameter_bytes}</td></tr>`).join('')}</tbody></table></div></details>`;
 }
+// Browser-only graph classification. This never selects a memory plan or modifies firmware.
+// Analyze the imported TFLite metadata, not the editable topology; the backend checks
+// the latter and storage safety when firmware is actually generated.
+function sourceSequentialAnalysis(project){
+  const src=project?.source;
+  if(src?.type!=='tflite') return {sequential:null,reason:'Import a TFLite model to inspect its graph.'};
+  if(!SEQUENTIAL?.analyze) return {sequential:null,reason:'Sequential-network detector is unavailable.'};
+  if(!Array.isArray(src.inputs)||!Array.isArray(src.outputs)||!Array.isArray(src.operators))
+    return {sequential:null,reason:'Imported model is missing graph metadata.'};
+  try { return SEQUENTIAL.analyze(src); }
+  catch(err) { return {sequential:null,reason:'Cannot inspect this graph: '+err.message}; }
+}
+function renderSequentialAnalysis(){
+  const el=$('sequentialAnalysis');if(!el)return;
+  const result=sourceSequentialAnalysis(state);
+  const cap=firmwareCompatibility(state);
+  const supportsPingPong=cap.backend==='s3_fp32_generic';
+  const requested=state.settings?.apply_pingpong_sequential===true;
+  const type=result.sequential===true?'sequential':result.sequential===false?'branched':'unavailable';
+  const title=result.sequential===true ? `Sequential source graph (${result.operatorCount} operators)` :
+    result.sequential===false?'Non-sequential source graph':'Graph classification unavailable';
+  const detail=result.sequential===false ? `${result.reason}${Number.isInteger(result.operatorIndex)&&result.operatorIndex>=0?' (operator '+result.operatorIndex+')':''}.` :
+    result.sequential===null?result.reason:'';
+  let policy;
+  if(supportsPingPong && result.sequential===true)
+    policy=requested?'Ping-pong requested. Codegen verifies edited topology and buffers when generating firmware.':'Default: lifetime-based allocator. Check the box to request ping-pong.';
+  else if(supportsPingPong && requested)
+    policy='Ping-pong is requested but the graph is not eligible; Codegen will reject unsafe export.';
+  else if(supportsPingPong)
+    policy='The existing lifetime-based allocator remains selected.';
+  else
+    policy='Classification only. This target/backend keeps its existing memory strategy.';
+  el.className='sequential-diagnostic '+type;
+  el.innerHTML=`<strong>${textEscape(title)}</strong>${detail?' · '+textEscape(detail):''}<div>${textEscape(policy)}</div><small>Source TFLite classification only; edited topology and storage are validated separately during Codegen.</small>`;
+}
+
 function renderDerived(){
+  renderSequentialAnalysis();
   const out=validate(state);
   const tag=$('validationBadge');
   tag.className='status '+(out.errors.length?'bad':out.warnings.length?'warn':'good');
@@ -300,6 +386,11 @@ function renderDerived(){
   const issues=[...out.errors.map(t=>({t,c:'error'})),...out.warnings.map(t=>({t,c:''}))];
   panel.innerHTML=issues.length?`<div class="issues">${issues.slice(0,25).map(x=>`<div class="issue ${x.c}">${textEscape(x.t)}</div>`).join('')}${issues.length>25?`<div class="issue">${issues.length-25} additional issues omitted</div>`:''}</div>`:`<div class="allgood">No unsupported board choices, unknown buffers, or invalid topology expressions detected. <br><br><b>Note:</b> This checks structure, not actual kernel execution or memory limits.</div>`;
   $('graph').innerHTML=out.steps.filter(x=>x.type==='layer').length ? out.steps.filter(x=>x.type==='layer').map((s,i)=>`<div class="graphrow"><span class="step">${i+1}</span><span class="edge">${textEscape(s.inputs.join(' + '))}</span><span class="arrow">→</span><span class="edge op">${textEscape(s.layer)}</span><span class="arrow">→</span><span class="edge">${textEscape(s.output)}</span></div>`).join(''):`<div class="empty">Add a layer call to the topology editor.</div>`;
+  const capability=firmwareCompatibility(state);
+  $('firmwareBtn').disabled=!capability.supported;
+  $('firmwareBtn').title=capability.supported?capability.reason:capability.reason+' '+(capability.detail||'');
+  if(!capability.supported) $('generateStatus').textContent='Inspection only: '+capability.reason+' '+(capability.detail||'');
+  else if($('generateStatus').textContent.startsWith('Inspection only:')) $('generateStatus').textContent=capability.reason;
   $('cppPreview').textContent=cppPreview(state);
 }
 function download(name, content, type='text/plain') {
@@ -351,6 +442,26 @@ async function bundledLeNetModel(which){
   project.source.example='LeNet-5 '+which.toUpperCase()+' · reference model from LENET5.zip';
   return project;
 }
+
+async function bundledZooTFLite(key){
+  if(!TFLITE || typeof NoodleModelZoo==='undefined') throw new Error('Bundled model zoo is missing.');
+  const item=NoodleModelZoo.getTFLite(key);
+  const bytes=TFLITE.base64Decode(item.base64);
+  const digest=await TFLITE.sha256(bytes);
+  if(digest!==item.sha256) throw new Error('Bundled TFLite checksum mismatch for '+item.filename);
+  const model=TFLITE.inspectTFLite(bytes);
+  const project=fromTFLiteModel(model,item.filename,bytes,digest);
+  project.source.example='Tested model zoo · '+item.filename;
+  return project;
+}
+function bundledZooProject(key){
+  if(typeof NoodleModelZoo==='undefined') throw new Error('Bundled model zoo is missing.');
+  const project=normalizeProject(copy(NoodleModelZoo.getProject(key)));
+  project.source=project.source||{};
+  project.source.example='Tested model zoo · '+(project.source.file||project.source.name||key);
+  return project;
+}
+
 async function handleTFLiteFile(e){
   const file=e.target.files[0];if(!file)return;
   try {
@@ -369,16 +480,18 @@ function init(){
   $('board').addEventListener('change',e=>{state.target=e.target.value;render();});
   $('example').addEventListener('change',async e=>{
     const v=e.target.value;
-    if(v==='lenet_int8'||v==='lenet_fp32'){
-      try{state=await bundledLeNetModel(v==='lenet_int8'?'int8':'fp32');}
-      catch(err){alert('LeNet-5 example failed: '+err.message);return;}
-    }else if(v==='r14'){
-      try{
+    if(!v) return;
+    try {
+      if(v==='zoo_fcn_int8') state=await bundledZooTFLite('fcn_mnist16_int8');
+      else if(v==='zoo_lenet_int8') state=bundledZooProject('lenet_int8_project');
+      else if(v==='zoo_sq_int8') state=bundledZooProject('squeezenet_int8_project');
+      else if(v==='zoo_sq_fp32') state=bundledZooProject('squeezenet_fp32_project');
+      else if(v==='r14') {
         const r=JSON.parse($('r14Bundled').textContent);
         state=fromR14Graph(r);
-      } catch(err){alert('Bundled R14 graph could not be read: '+err.message);return;}
-    } else state=v==='fire'?sampleFire():sampleUno();
-    render();
+      } else state=v==='fire'?sampleFire():sampleUno();
+      render();
+    } catch(err){ alert('Bundled example failed: '+err.message); }
   });
   $('storageTable').addEventListener('input',handleInput);
   $('storageTable').addEventListener('change',handleInput);
@@ -400,27 +513,8 @@ function init(){
     state.settings.apply_pingpong_sequential=e.target.checked;
     renderDerived();
   });
-  $('pingPongOption').addEventListener('change',e=>{
-    state.settings=state.settings||{};
-    state.settings.apply_pingpong_sequential=e.target.checked;
-    renderDerived();
-  });
   $('exportBtn').addEventListener('click',exportJSON);
   $('cppBtn').addEventListener('click',()=>download('noodle_r15_static_call_plan.cpp',cppPreview(state)));
-  $('lenetPresetBtn').addEventListener('click',()=>{
-    if(state.source?.model_sha256!=='0c89db896852c0d69eb7be4e15fdd3981015247f0ed57ca666d8feb6e21c5073'){
-      alert('Select the bundled LeNet-5 INT8 TFLite model first. This preset is not applicable to other models.');return;
-    }
-    if(!confirm('Explicitly set the selected LeNet-5 INT8 project to Uno with SD convolution/FCN parameters and SD activation buffers? Your topology stays unchanged.'))return;
-    state.target='uno';
-    const ids={};
-    for(const [i,op] of state.source.operators.entries())ids[i]=op.outputs[0];
-    const sd=new Map([[state.source.inputs[0],'/in.bin'],[ids[0],'/c1.bin'],[ids[1],'/p1.bin'],[ids[2],'/c2.bin'],[ids[3],'/p2.bin'],[ids[4],'/flat.bin']]);
-    for(const b of state.storage){b.backend=sd.has(b.tensor_id)?'SD':'SRAM';b.path=sd.get(b.tensor_id)||'';}
-    for(const l of state.layers){l.params=['CONV_2D','FCN'].includes(l.kind)?'SD':'-';}
-    render();
-    $('generateStatus').textContent='LeNet-5 Uno/SD preset applied explicitly; review storage and topology before experimental firmware export.';
-  });
   $('firmwareBtn').addEventListener('click',async()=>{
     $('generateStatus').textContent='Generating...';
     try {
@@ -431,11 +525,14 @@ function init(){
         const hash=await TFLITE.sha256(data);
         if(hash!==state.source.model_sha256)throw Error('Embedded TFLite checksum mismatch. Re-import the original model.');
       }
-      const lenetExperimental=state.target==='uno' && state.source?.model_sha256==='0c89db896852c0d69eb7be4e15fdd3981015247f0ed57ca666d8feb6e21c5073';
-      const packageFiles=lenetExperimental?NoodleLeNetUno.generate(state):NoodleCodegen.generate(state);
-      download(lenetExperimental?'noodle_r15_v06_UNO_LENET5_EXPERIMENTAL.zip':'noodle_r15_v06_uno_int8_firmware.zip',NoodleCodegen.zip(packageFiles.files),'application/zip');
-      const policy=packageFiles.summary.sequentialPingPong?'Ping-pong ENABLED':(state.settings?.apply_pingpong_sequential?'Ping-pong not applicable; explicit buffers preserved':'Ping-pong OFF (default)');
-      $('generateStatus').textContent=(lenetExperimental?'LeNet-5 export: ':'Firmware export: ')+policy+' · '+packageFiles.summary.layers.length+' layer calls · '+packageFiles.summary.sdLayers+' SD parameter layers.';
+      const capability=firmwareCompatibility(state);
+      if(!capability.supported) throw Error(capability.reason+' '+(capability.detail||''));
+      const generators={s3_int8:()=>NoodleESP32S3.generate(state),s3_fp32:()=>NoodleESP32S3FP32.generate(state),s3_fp32_generic:()=>NoodleESP32S3GenericFP32.generate(state),uno_lenet5:()=>NoodleLeNetUno.generate(state),uno_fcn:()=>NoodleCodegen.generate(state)};
+      const names={s3_int8:'noodle_r15_esp32s3_squeezenet_int8_xip_psram.zip',s3_fp32:'noodle_r15_esp32s3_squeezenet_fp32_xip_psram.zip',s3_fp32_generic:'noodle_r15_esp32s3_generic_fp32_firmware.zip',uno_lenet5:'noodle_r15_v06_UNO_LENET5_EXPERIMENTAL.zip',uno_fcn:'noodle_r15_v06_uno_int8_firmware.zip'};
+      const packageFiles=generators[capability.backend]();
+      download(names[capability.backend],NoodleCodegen.zip(packageFiles.files),'application/zip');
+      const policy=packageFiles.summary.sequentialPingPong?'Ping-pong ENABLED (two PSRAM regions)':(capability.backend==='s3_fp32_generic'?'Static lifetime arena':(state.settings?.apply_pingpong_sequential?'Ping-pong not applicable; explicit buffers preserved':'Ping-pong OFF (default)'));
+      $('generateStatus').textContent=capability.reason+' '+policy+' · '+packageFiles.summary.layers.length+' layer calls · '+packageFiles.summary.sdLayers+' SD parameter layers.';
     }catch(err){$('generateStatus').textContent='Generation rejected: '+err.message;alert('Firmware generation unavailable: '+err.message);}
   });
   $('importBtn').addEventListener('click',()=>$('importFile').click());
@@ -445,4 +542,4 @@ function init(){
   // Fully local, no server: uploaded TFLite bytes remain in the browser and are embedded in the saved JSON.
 }
 if(typeof document!=='undefined') document.addEventListener('DOMContentLoaded',init);
-if(typeof module!=='undefined' && module.exports) module.exports={sampleUno,sampleFire,bundledLeNetModel,fromR14Graph,fromTFLiteModel,normalizeProject,validate,parseTopology,cppPreview};
+if(typeof module!=='undefined' && module.exports) module.exports={sampleUno,sampleFire,bundledLeNetModel,fromR14Graph,fromTFLiteModel,normalizeProject,validate,firmwareCompatibility,parseTopology,cppPreview};

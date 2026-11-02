@@ -1,0 +1,21 @@
+'use strict';
+const fs=require('fs'),crypto=require('crypto'),assert=require('assert');
+const T=require('./tflite_import.js'),S=require('./studio.js'),G=require('./esp32s3_generic_fp32_codegen.js');
+const filename=__dirname+'/lenet5_fp32.tflite';
+const bytes=fs.readFileSync(filename),model=T.inspectTFLite(bytes);
+const hash=crypto.createHash('sha256').update(bytes).digest('hex');
+const project=S.fromTFLiteModel(model,'lenet5_fp32.tflite',bytes,hash);
+assert.equal(S.firmwareCompatibility(project).backend,'s3_fp32_generic');
+assert.equal(S.validate(project).errors.length,0);
+const out=G.generate(project);
+assert.equal(out.summary.layers.length,9);
+assert(out.summary.arenaBytes>0 && out.summary.arenaBytes<8*1024*1024);
+assert.equal(JSON.parse(out.files['test/input_spec.json']).bytes,3136);
+assert.equal(JSON.parse(out.files['test/output_spec.json']).shape.join(','),'1,10');
+assert(out.files['src/main.cpp'].includes('SERIAL_BYTES=3136u'));
+assert(out.files['src/main.cpp'].includes('NOODLE_GENERIC_FP32_N16R8'));
+assert(out.files['src/main.cpp'].includes('  {10, 0,')); // SOFTMAX
+assert(out.files['lib/Noodle/src/noodle_s3_nhwc_fp32.cpp'].includes('NDL_F32_FCN'));
+assert.equal(typeof out.files['test/send_tensor.py'],'string');
+assert.equal(S.firmwareCompatibility({...project,target:'uno'}).supported,false);
+console.log('PASS generic FP32 LeNet-5: 9 ops, raw 3136-byte FP32 input, 10 outputs, PSRAM arena, XIP params');

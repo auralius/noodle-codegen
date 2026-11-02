@@ -8,3 +8,17 @@
 /* Optional sequential-only optimization; never enabled by default. */
 .codegen-option{display:flex;align-items:center;gap:10px;margin:8px 0;font-weight:600;cursor:pointer}
 .codegen-option input{width:17px;height:17px;flex:none;accent-color:#3c82d2}
+
+/* Capability-aware export: loading a model for inspection is not the same as exporting firmware. */
+.model-export-notice{display:flex;flex-direction:column;gap:5px;padding:11px 12px;margin:11px 0;border-radius:8px;font-size:12px;line-height:1.5}
+.model-export-notice.export-unsupported{background:#fff5e8;border:1px solid #e7c89d;color:#744615}
+.model-export-notice.export-supported{background:#eef8f3;border:1px solid #b8d8c5;color:#1b573b}
+#firmwareBtn:disabled{opacity:.45;cursor:not-allowed}
+
+/* Informational TFLite graph classification; no effect on backend allocation policy. */
+.sequential-diagnostic{border:1px solid #dbe3ed;border-left:3px solid #9caec1;border-radius:7px;padding:10px 12px;margin:10px 0 14px;font-size:12px;line-height:1.55;color:#3f566e;background:#f8fafc}
+.sequential-diagnostic strong{font-weight:700}
+.sequential-diagnostic div{margin-top:4px}
+.sequential-diagnostic small{display:block;margin-top:4px;color:#718298;font-size:11px}
+.sequential-diagnostic.sequential{border-left-color:#2d9967}
+.sequential-diagnostic.branched{border-left-color:#bd8535}

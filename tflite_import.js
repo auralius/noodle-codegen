@@ -59,6 +59,12 @@ function inspectTFLite(input){
    if(o!==null && code.name==='FULLY_CONNECTED') {cfg.activation=ACTIVATIONS[f.val(o,0,'u8')]||'UNKNOWN';cfg.weights_format=f.val(o,1,'u8');cfg.keep_num_dims=!!f.val(o,2,'u8');}
    if(o!==null && code.name==='CONV_2D'){cfg.padding=f.val(o,0,'u8');cfg.stride_w=f.val(o,1,'i32',1);cfg.stride_h=f.val(o,2,'i32',1);cfg.activation=ACTIVATIONS[f.val(o,3,'u8')]||'UNKNOWN';cfg.dilation_w=f.val(o,4,'i32',1);cfg.dilation_h=f.val(o,5,'i32',1);}
    if(o!==null && code.name==='DEPTHWISE_CONV_2D'){cfg.padding=f.val(o,0,'u8');cfg.stride_w=f.val(o,1,'i32',1);cfg.stride_h=f.val(o,2,'i32',1);cfg.depth_multiplier=f.val(o,3,'i32',1);cfg.activation=ACTIVATIONS[f.val(o,4,'u8')]||'UNKNOWN';}
+   if(o!==null && ['MAX_POOL_2D','AVERAGE_POOL_2D'].includes(code.name)){
+     cfg.padding=f.val(o,0,'u8');cfg.stride_w=f.val(o,1,'i32',1);cfg.stride_h=f.val(o,2,'i32',1);
+     cfg.filter_w=f.val(o,3,'i32',1);cfg.filter_h=f.val(o,4,'i32',1);cfg.activation=ACTIVATIONS[f.val(o,5,'u8')]||'UNKNOWN';
+   }
+   if(o!==null && ['SUB','MUL','ADD'].includes(code.name))cfg.activation=ACTIVATIONS[f.val(o,0,'u8')]||'UNKNOWN';
+   if(o!==null && code.name==='MEAN')cfg.keep_dims=!!f.val(o,0,'u8');
    if(o!==null && code.name==='SOFTMAX'){cfg.beta=f.val(o,0,'f32',1);}
    if(o!==null && code.name==='CONCATENATION'){cfg.axis=f.val(o,0,'i32');cfg.activation=ACTIVATIONS[f.val(o,1,'u8')]||'UNKNOWN';}
    return {id,op:code.name,opcode:code.id,version:code.version,inputs:ins,outputs:outs,config:cfg,

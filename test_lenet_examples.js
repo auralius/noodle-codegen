@@ -30,9 +30,13 @@ const C=require('./firmware_codegen.js');
   }
   const source=fs.readFileSync(__dirname+'/index.html','utf8');
   assert(!source.includes('value="cute"'));
-  assert(source.includes('value="lenet_int8"')&&source.includes('value="lenet_fp32"'));
+  assert(source.includes('value="zoo_lenet_int8"'));
+  assert(!source.includes('value="zoo_lenet_fp32"'));
+  assert(!source.includes('id="lenetPresetBtn"'));
+  assert(source.includes('value="zoo_sq_int8"')&&source.includes('value="zoo_sq_fp32"'));
+  assert(source.includes('src="model_zoo_examples.js"'));
   assert(source.includes('src="lenet5_examples.js"'));
   const legacy={...S.sampleUno(),format:'noodle-studio-r15/v0.5'};
   assert.equal(S.normalizeProject(legacy).format,'noodle-studio-r15/v0.5.1');
-  console.log('PASS: old CUTE-YOLO selector removed, LeNet-5 variants selectable, v0.5 JSON compatible');
+  console.log('PASS: Model Zoo shows LeNet-5 INT8, SqueezeNet INT8/FP32; no redundant LeNet preset or FP32 preview; v0.5 JSON compatible');
 })().catch(e=>{console.error(e);process.exit(1)});
