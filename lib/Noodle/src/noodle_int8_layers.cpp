@@ -875,6 +875,8 @@ static int8_t *q_avr_filter = nullptr;
 static uint16_t q_avr_filter_bytes = 0;
 static uint8_t *q_avr_io = nullptr;
 static uint8_t q_avr_io_bytes = 0;
+// Caller-owned scratch reused with later-layer activation storage.
+static int32_t *q_avr_conv_acc = nullptr;
 
 // Operators are deliberately silent; application-level UART owns reporting.
 #define NDL_AVR_CONV_BEGIN(ch,w) ((void)0)
@@ -889,6 +891,10 @@ void noodle_i8_avr_bind_scratch(int8_t *filter, uint16_t filter_bytes,
   q_avr_filter_bytes = filter_bytes;
   q_avr_io = io;
   q_avr_io_bytes = io_bytes;
+}
+
+void noodle_i8_avr_bind_conv_accumulators(int32_t *acc) {
+  q_avr_conv_acc = acc;
 }
 
 static bool q_avr_seek(NDL_File &f, uint32_t off) {
@@ -945,6 +951,72 @@ static bool q_avr_conv_pixel(NDL_File &src, const NoodleTensor *input,
                               l.activation_min,l.activation_max);
   return true;
 }
+// Optional low-SRAM AVR optimization for a fused 2x2 pooling window.
+// The four adjacent convolution outputs overlap: for a KxK filter and
+// convolution stride one they access a (K+1)x(K+1) input region per channel.
+// Stream each valid row of that region once and accumulate all four results.
+// No full-tile buffer, additional file handle, or operator-level reporting.
+// For other pooling/kernel configurations the existing kernel remains in use.
+#if defined(NOODLE_INT8_AVR_CONV_SHARED_WINDOW) && NOODLE_INT8_AVR_CONV_SHARED_WINDOW
+static bool q_avr_conv_pool_2x2_shared(NDL_File &src, const NoodleTensor *input,
+                                     const Conv &l, uint16_t pad,
+                                     uint16_t oy, uint16_t ox,
+                                     int32_t bias, int32_t mul, int32_t shift,
+                                     uint8_t pool_mode, int8_t *pooled) {
+  // Four accumulators live in caller-owned, lifetime-reused SRAM.
+  // No additional 16-byte array on the deep AVR convolution stack.
+  int32_t * const dot = q_avr_conv_acc;
+  if (!dot) return false;
+  dot[0]=dot[1]=dot[2]=dot[3]=0;
+  const int32_t y0=(int32_t)oy-pad;
+  const int32_t x0=(int32_t)ox-pad;
+  const int32_t K=l.K;
+  const int32_t W=input->W;
+  // For each input channel and input row, perform a single seek and one
+  // contiguous read over all valid x positions (up to K+1 bytes).
+  for (uint16_t ic=0; ic<input->C; ++ic) {
+    const uint16_t filter_channel_base=(uint16_t)(ic*l.K*l.K);
+    for (int32_t ry=0; ry<=K; ++ry) {
+      const int32_t iy=y0+ry;
+      if (iy<0 || iy>=W) continue;
+      int32_t begin=x0<0 ? 0 : x0;
+      int32_t end=x0+K+1;
+      if (end>W) end=W;
+      if (begin>=end) continue;
+      const uint32_t pos=((uint32_t)ic*input->W+(uint16_t)iy)*input->W+(uint16_t)begin;
+      if (!q_avr_seek(src,pos)) { return false; }
+      for (int32_t ix=begin;ix<end;++ix) {
+        const int v=src.read();
+        if (v<0) { return false; }
+        const int32_t rx=ix-x0;
+        const int32_t a=(int32_t)(int8_t)(uint8_t)v-l.input_zero_point;
+        if (ry<K) {
+          if (rx<K) dot[0]+=a*q_avr_filter[filter_channel_base+(uint16_t)ry*l.K+(uint16_t)rx];
+          if (rx>0) dot[1]+=a*q_avr_filter[filter_channel_base+(uint16_t)ry*l.K+(uint16_t)(rx-1)];
+        }
+        if (ry>0) {
+          if (rx<K) dot[2]+=a*q_avr_filter[filter_channel_base+(uint16_t)(ry-1)*l.K+(uint16_t)rx];
+          if (rx>0) dot[3]+=a*q_avr_filter[filter_channel_base+(uint16_t)(ry-1)*l.K+(uint16_t)(rx-1)];
+        }
+      }
+    }
+  }
+  int32_t sum=0;
+  int8_t vmax=-128;
+  for (uint8_t j=0;j<4;++j) {
+    const int64_t total=(int64_t)dot[j]+bias;
+    const int32_t acc=total>INT32_MAX?INT32_MAX:
+                      (total<INT32_MIN?INT32_MIN:(int32_t)total);
+    const int8_t q=(int8_t)q_apply_output(acc,mul,shift,
+                        l.output_zero_point,l.activation_min,l.activation_max);
+    sum+=(int32_t)q;
+    if (q>vmax) vmax=q;
+  }
+  *pooled=(pool_mode==NOODLE_I8_POOL_MEAN) ?
+      noodle_i8_average_pool_raw(sum,4) : vmax;
+  return true;
+}
+#endif
 static uint16_t q_avr_fused_conv(NoodleTensor *input, const Conv &l,
                                   const NoodleI8Pool &pool, NoodleTensor *out) {
   if(!input||!out||input==out||!input->file_path||!out->file_path||
@@ -952,45 +1024,62 @@ static uint16_t q_avr_fused_conv(NoodleTensor *input, const Conv &l,
      !q_avr_filter||!q_avr_io||!q_avr_io_bytes||
      input->rank!=NOODLE_TENSOR_2D||
      !q_input_matches(input,l.input_scale,l.input_zero_point)||
-     strcmp(input->file_path,out->file_path)==0)return 0;
+     strcmp(input->file_path,out->file_path)==0){return 0;}
   QGeom g;
-  if(!q_conv_geom(input->W,l.K,l.P,l.S,&g)||g.V<pool.M)return 0;
+  if(!q_conv_geom(input->W,l.K,l.P,l.S,&g)||g.V<pool.M){return 0;}
   const uint16_t outW=(g.V-pool.M)/pool.T+1;
   const uint32_t n=(uint32_t)input->C*l.K*l.K;
-  if(!n||n>q_avr_filter_bytes)return 0;
+  if(!n||n>q_avr_filter_bytes){return 0;}
   NDL_File f; // One live handle at a time, regardless of layer width.
   if(!noodle_fs_prepare_output_into(f,out->file_path,
-       (uint32_t)l.O * outW * outW))return 0;
+       (uint32_t)l.O * outW * outW)){return 0;}
   uint32_t out_pos=0;
   for(uint16_t oc=0;oc<l.O;++oc){
-    if(!q_avr_read_at(f,l.weight_fn,(uint32_t)oc*n,(uint8_t*)q_avr_filter,n))return 0;
-    uint8_t record[12];
-    if(!q_avr_read_at(f,l.metadata_fn,(uint32_t)oc*12u,record,12))return 0;
+    if(!q_avr_read_at(f,l.weight_fn,(uint32_t)oc*n,(uint8_t*)q_avr_filter,n)){return 0;}
+    // Metadata is needed only until these three integers are decoded.
+    // Reuse the I/O scratch before it starts buffering pooled outputs.
+    if(q_avr_io_bytes<12){return 0;}
+    uint8_t * const record = q_avr_io;
+    if(!q_avr_read_at(f,l.metadata_fn,(uint32_t)oc*12u,record,12)){return 0;}
     const int32_t bias=q_avr_le32(record),mul=q_avr_le32(record+4),sh=q_avr_le32(record+8);
     for(uint16_t py=0;py<outW;++py){
       for(uint16_t base=0;base<outW;){
         const uint8_t count=(outW-base<q_avr_io_bytes)?(uint8_t)(outW-base):q_avr_io_bytes;
-        if(!noodle_fs_open_read_into(f,input->file_path))return 0;
+        if(!noodle_fs_open_read_into(f,input->file_path)){return 0;}
         bool ok=true;
         for(uint8_t bx=0;bx<count&&ok;++bx){
           const uint16_t px=base+bx;
-          int32_t sum=0;int8_t vmax=-128;
-          for(uint16_t yy=0;yy<pool.M&&ok;++yy)for(uint16_t xx=0;xx<pool.M;++xx){
-            int8_t q;
-            if(!q_avr_conv_pixel(f,input,l,g.P0,py*pool.T+yy,
-                                 px*pool.T+xx,bias,mul,sh,&q)){ok=false;break;}
-            sum+=(int32_t)q;if(q>vmax)vmax=q;
+#if defined(NOODLE_INT8_AVR_CONV_SHARED_WINDOW) && NOODLE_INT8_AVR_CONV_SHARED_WINDOW
+          // Only the stride-one, 2x2 case has a shared (K+1)x(K+1) region.
+          // All other geometries use the untouched low-memory implementation.
+          if (q_avr_conv_acc && l.S==1 && pool.M==2) {
+            int8_t value=0;
+            ok=q_avr_conv_pool_2x2_shared(f,input,l,g.P0,
+                    py*pool.T,px*pool.T,bias,mul,sh,pool.mode,&value);
+            if(ok) q_avr_io[bx]=(uint8_t)value;
+          } else
+#endif
+          {
+            int32_t sum=0;int8_t vmax=-128;
+            for(uint16_t yy=0;yy<pool.M&&ok;++yy)for(uint16_t xx=0;xx<pool.M;++xx){
+              int8_t q;
+              if(!q_avr_conv_pixel(f,input,l,g.P0,py*pool.T+yy,
+                                   px*pool.T+xx,bias,mul,sh,&q)){ok=false;break;}
+              sum+=(int32_t)q;if(q>vmax)vmax=q;
+            }
+            q_avr_io[bx]=(uint8_t)(pool.mode==NOODLE_I8_POOL_MEAN?
+                         noodle_i8_average_pool_raw(sum,(int32_t)pool.M*pool.M):vmax);
           }
-          q_avr_io[bx]=(uint8_t)(pool.mode==NOODLE_I8_POOL_MEAN?
-                       noodle_i8_average_pool_raw(sum,(int32_t)pool.M*pool.M):vmax);
 }
         f.close();
-        if(!ok||!q_avr_write_at(f,out->file_path,out_pos,q_avr_io,count))return 0;
+        if(!ok)return 0;
+        if(!q_avr_write_at(f,out->file_path,out_pos,q_avr_io,count)){return 0;}
         out_pos+=count;base+=count;
       }
     }
   }
-  return noodle_i8_tensor_file_2d(out,l.O,outW,l.output_scale,l.output_zero_point)?outW:0;
+  if(!noodle_i8_tensor_file_2d(out,l.O,outW,l.output_scale,l.output_zero_point)){return 0;}
+  return outW;
 }
 static uint16_t q_avr_flat_file(NoodleTensor *input,NoodleTensor *out){
   if(!input||!out||!input->file_path||!out->file_path||
@@ -1084,6 +1173,7 @@ static uint16_t q_avr_packed_fcn(NoodleTensor *input,const FCNFile &l,NoodleTens
 }
 #else
 void noodle_i8_avr_bind_scratch(int8_t *,uint16_t,uint8_t *,uint8_t) {}
+void noodle_i8_avr_bind_conv_accumulators(int32_t *) {}
 #endif
 
 template <typename Layer>

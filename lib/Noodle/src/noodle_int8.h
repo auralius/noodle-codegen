@@ -74,6 +74,9 @@ void noodle_write_i32(NDL_File &f, int32_t value);
 // an operator completes. Only used when NOODLE_INT8_AVR_LOW_MEMORY is defined.
 void noodle_i8_avr_bind_scratch(int8_t *filter, uint16_t filter_bytes,
                                 uint8_t *io, uint8_t io_bytes);
+// Optional four-accumulator scratch for fused AVR 2x2-pool convolution.
+// Caller owns the memory; it may be aliased with later-layer activations.
+void noodle_i8_avr_bind_conv_accumulators(int32_t *acc);
 
 // Internal full-int8 layer kernels. Public wrappers keep the old Noodle API.
 uint16_t noodle_i8_conv2d(NoodleTensor *input, const Conv &layer,

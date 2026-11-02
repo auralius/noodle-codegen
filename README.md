@@ -1,4 +1,4 @@
-# Noodle Studio R15 v0.6.5 — Noodle-runtime-first Uno LeNet-5 (EXPERIMENTAL)
+# Noodle Studio R15 v0.6.6 — Noodle-runtime-first Uno LeNet-5 (EXPERIMENTAL)
 
 **Goal:** Execute the original INT8 LeNet-5 on an Arduino Uno/Nano ATmega328P with only 2 KB SRAM, without implementing CNN/FCN arithmetic in the generated application.
 

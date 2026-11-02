@@ -24,7 +24,10 @@ static uint8_t r15_io[32];
 // FC1 output is dead before FC3 overwrites it; I/O scratch is dead at Softmax.
 // Descriptors are rebound after their old values die. The two activation
 // buffers alternate during the dense stages; serial/SD I/O uses r15_io.
-static int8_t r15_hidden84[84];
+// Lifetime reuse: Conv2D scratch and FC2 activations never coexist.
+// The union supplies 4-byte alignment for the four int32 accumulators.
+union R15SharedScratch { int32_t conv_acc[4]; int8_t hidden84[84]; };
+static R15SharedScratch r15_shared_scratch;
 static void r15_bind_scratch(NoodleTensor &t,int8_t *buffer,uint16_t cap,uint16_t n,float scale,int32_t zp){
   // These are non-owning views into persistent scratch. Do not free or grow them.
   noodle_buffer_bind_external(&t.buffer,buffer,cap);
@@ -152,7 +155,7 @@ static bool run_user_topology(){
 
   R15_STAGE_TOC("FC1");
   // The flattened SD input is dead after FC1. Rebind tensor_b to hidden84.
-  r15_bind_scratch(tensor_b,r15_hidden84,sizeof(r15_hidden84),84,@@H2_SCALE@@f,@@H2_ZP@@);
+  r15_bind_scratch(tensor_b,r15_shared_scratch.hidden84,sizeof(r15_shared_scratch.hidden84),84,@@H2_SCALE@@f,@@H2_ZP@@);
   Serial.println(F("STAGE FC2"));
   bind_fc2();
   R15_STAGE_TIC();
@@ -170,6 +173,7 @@ void setup(){
   Serial.begin(115200);
   bind_pool_parameters();
   noodle_i8_avr_bind_scratch(r15_filter,sizeof(r15_filter),r15_io,sizeof(r15_io));
+  noodle_i8_avr_bind_conv_accumulators(r15_shared_scratch.conv_acc);
   if(!init_storage()){Serial.println(F("ERR_INIT_MEMORY"));while(true){}}
   if(!noodle_fs_init(10)){Serial.println(F("ERR_SD_INIT"));while(true){}}
 
