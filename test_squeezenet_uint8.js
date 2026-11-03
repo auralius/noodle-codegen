@@ -44,7 +44,7 @@ assert.equal(exported.summary.operators,43);
 assert.equal(exported.summary.activationBytes,4975136);
 assert(exported.summary.xipBytes>1200000&&exported.summary.xipBytes<1400000);
 assert.equal(exported.files['model/params.bin'].length,exported.summary.xipBytes);
-assert.match(exported.files['src/main.cpp'],/noodle_s3_i8_execute/);
+assert.match(exported.files['src/main.cpp'],/noodle_i8_graph_execute/);
 assert.match(exported.files['platformio.ini'],/16MB/);
 assert.match(exported.files['platformio.ini'],/pio_flash_model.py/);
 assert.match(exported.files['platformio.ini'],/ARDUINO_USB_CDC_ON_BOOT=1/);

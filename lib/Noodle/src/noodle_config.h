@@ -136,6 +136,16 @@
   #define NOODLE_INT8_CONV_IMPL NOODLE_INT8_CONV_IMPL_DIRECT
 #endif
 
+// Optional checked INT32 accumulation for the *tiled* 3x3 path only.
+// Off by default to preserve all existing MCU builds and reference behavior.
+// Per-output-filter bounds are verified; unsafe filters use INT64 unchanged.
+#ifndef NOODLE_INT8_CONV3X3_ACC32
+  #define NOODLE_INT8_CONV3X3_ACC32 0
+#endif
+#if (NOODLE_INT8_CONV3X3_ACC32 != 0) && (NOODLE_INT8_CONV3X3_ACC32 != 1)
+  #error "NOODLE_INT8_CONV3X3_ACC32 must be 0 or 1"
+#endif
+
 // Spatial output tile edge used by the INT8 streaming kernel.  This is not
 // the convolution kernel width; a 3x3 layer still uses a 3x3 kernel.
 #ifndef NOODLE_INT8_OUTPUT_TILE

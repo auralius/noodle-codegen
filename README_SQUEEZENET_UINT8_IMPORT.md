@@ -1,3 +1,5 @@
+> Historical behavior for the release named below. As of **v0.6.23**, the GUI no longer exposes the ping-pong checkbox; see [`README_AUTOMATIC_MEMORY_POLICY.md`](README_AUTOMATIC_MEMORY_POLICY.md). Existing direct Codegen APIs retain their legacy flags for compatibility.
+
 # SqueezeNet-1.1 UINT8 TFLite import (inspection only)
 
 This update to Noodle Studio R15 v0.6.6 accepts `UINT8` TFLite input tensors, keeping the unchanged embedded model binary and tensor-by-tensor quantization metadata. It also lists and recognizes the `QUANTIZE`, `SUB`, and `MUL` operations used by Qualcomm SqueezeNet-1.1 W8A8.

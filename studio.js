@@ -10,6 +10,12 @@ const BOARD = {
     params: ['PROGMEM', 'SRAM', 'SD'],
     tags: ['2 KiB SRAM', '32 KiB Flash', 'Near PROGMEM', 'SD optional']
   },
+  mega2560: {
+    label: 'Arduino Mega 2560 (ATmega2560)',
+    storage: ['SRAM', 'SD'],
+    params: ['PROGMEM', 'SRAM', 'SD'],
+    tags: ['8 KiB SRAM', '256 KiB Flash', 'PROGMEM', 'SD feature maps']
+  },
   esp32s3: {
     label: 'ESP32-S3 N16R8',
     storage: ['SRAM', 'PSRAM', 'FFat', 'SD'],
@@ -17,8 +23,8 @@ const BOARD = {
     tags: ['8 MiB PSRAM', '16 MiB Flash', 'FFat partition', 'XIP']
   }
 };
-const OPERATIONS = ['FCN', 'Conv2D', 'DepthwiseConv2D', 'PointwiseConv2D', 'MaxPool', 'AvgPool', 'Concat', 'Add', 'ReLU', 'HybridBlock', 'GAP', 'Reshape', 'Softmax', 'SOFTMAX', 'FULLY_CONNECTED', 'CONV_2D', 'MAX_POOL_2D', 'AVERAGE_POOL_2D', 'CONCATENATION', 'MEAN', 'RESHAPE', 'QUANTIZE', 'SUB', 'MUL'];
-const NONPARAM = new Set(['MaxPool','AvgPool','Concat','Add','ReLU','GAP','Reshape','MAX_POOL_2D','AVERAGE_POOL_2D','CONCATENATION','MEAN','RESHAPE','Softmax','SOFTMAX','QUANTIZE']);
+const OPERATIONS = ['FCN', 'Conv2D', 'DepthwiseConv2D', 'PointwiseConv2D', 'MaxPool', 'AvgPool', 'Concat', 'Add', 'ReLU', 'HybridBlock', 'GAP', 'Reshape', 'Softmax', 'SOFTMAX', 'FULLY_CONNECTED', 'CONV_2D', 'MAX_POOL_2D', 'AVERAGE_POOL_2D', 'CONCATENATION', 'MEAN', 'RESHAPE', 'QUANTIZE', 'SUB', 'MUL', 'DEPTHWISE_CONV_2D', 'PAD'];
+const NONPARAM = new Set(['MaxPool','AvgPool','Concat','Add','ReLU','GAP','Reshape','MAX_POOL_2D','AVERAGE_POOL_2D','CONCATENATION','MEAN','RESHAPE','Softmax','SOFTMAX','QUANTIZE','PAD']);
 const RESERVED = new Set(['destroy', 'close']);
 const TFLITE = (typeof NoodleTFLite !== 'undefined') ? NoodleTFLite : null;
 const SEQUENTIAL = (typeof NoodleSequentialNetwork !== 'undefined') ? NoodleSequentialNetwork : null;
@@ -113,8 +119,11 @@ function fromTFLiteModel(model, filename, bytes, hash) {
   if(dataInputs.some(t=>!['INT8','UINT8','FLOAT32'].includes(t.dtype)))throw new Error('R15 imports INT8, UINT8, or FLOAT32 model inputs for inspection. This model has input types: '+dataInputs.map(t=>t.dtype).join(', '));
   const opTypes=model.operators.map(o=>o.op);
   const isFCOps=opTypes.every(n=>['FULLY_CONNECTED','SOFTMAX','RESHAPE','RELU'].includes(n));
-  const target=isFCOps && dataInputs.every(t=>t.dtype==='INT8')?'uno':'esp32s3';
-  const backend=target==='uno'?'SRAM':'PSRAM',paramBackend=target==='uno'?'PROGMEM':'XIP';
+  const mobileLeNet = model.operators.length===18 && dataInputs[0]?.shape.join(',')==='1,16,16,1' &&
+    ['INT8','FLOAT32'].includes(dataInputs[0]?.dtype) && model.operators.map(o=>o.op).join('|')===
+    'CONV_2D|DEPTHWISE_CONV_2D|CONV_2D|DEPTHWISE_CONV_2D|CONV_2D|PAD|DEPTHWISE_CONV_2D|CONV_2D|DEPTHWISE_CONV_2D|CONV_2D|PAD|DEPTHWISE_CONV_2D|CONV_2D|DEPTHWISE_CONV_2D|CONV_2D|MEAN|FULLY_CONNECTED|SOFTMAX';
+  const target=mobileLeNet?'mega2560':isFCOps && dataInputs.every(t=>t.dtype==='INT8')?'uno':'esp32s3';
+  const backend=target==='uno'?'SRAM':target==='mega2560'?'SD':'PSRAM',paramBackend=['uno','mega2560'].includes(target)?'PROGMEM':'XIP';
   const nameMap=new Map(),storage=[],layers=[],calls=[],counts={};
   function addTensor(id,hint){
     if(nameMap.has(id))return nameMap.get(id);
@@ -140,6 +149,13 @@ function fromTFLiteModel(model, filename, bytes, hash) {
       op_index:op.id,parameter_tensors:p,op_options:copy(op.config),notes:'Imported TFLite '+op.op+' v'+op.version+(op.config.activation?', '+op.config.activation:'')});
     calls.push(`${dst} = ${name}(${src.join(', ')});`);
   }
+  if(mobileLeNet){
+    for(const b of storage){
+      const i=model.operators.findIndex(o=>o.outputs[0]===b.tensor_id);
+      if(i<0||i<=12){b.backend='SD';b.path=`/A${String(Math.max(0,i+1)).padStart(2,'0')}.bin`;}
+      else {b.backend='SRAM';b.path='';}
+    }
+  }
   const otherDtypes=model.tensors.filter(x=>x.parameter_bytes>0&& !['INT8','INT32'].includes(x.dtype));
   // FP32 constants in non-FCN operations may exist; importer preserves them without pretending they are INT8 weights.
   return {format:NS_FORMAT,target,source:{name:filename,type:'tflite',file:filename,model_sha256:hash,
@@ -156,6 +172,7 @@ const LENET5_INT8_SHA='0c89db896852c0d69eb7be4e15fdd3981015247f0ed57ca666d8feb6e
 const S3_INT8_OPS=new Set(['CONV_2D','MAX_POOL_2D','CONCATENATION','QUANTIZE','SUB','MUL','MEAN','RESHAPE']);
 const S3_FP32_OPS=new Set(['SUB','MUL','CONV_2D','MAX_POOL_2D','AVERAGE_POOL_2D','CONCATENATION','MEAN','RESHAPE','FULLY_CONNECTED','SOFTMAX']);
 const UNO_FCN_OPS=new Set(['FULLY_CONNECTED','SOFTMAX']);
+const MEGA_MOBILE_OPS='CONV_2D|DEPTHWISE_CONV_2D|CONV_2D|DEPTHWISE_CONV_2D|CONV_2D|PAD|DEPTHWISE_CONV_2D|CONV_2D|DEPTHWISE_CONV_2D|CONV_2D|PAD|DEPTHWISE_CONV_2D|CONV_2D|DEPTHWISE_CONV_2D|CONV_2D|MEAN|FULLY_CONNECTED|SOFTMAX';
 function firmwareCompatibility(project){
   const src=project?.source||{};
   const no=(reason,detail='')=>({supported:false,backend:null,reason,detail});
@@ -170,6 +187,12 @@ function firmwareCompatibility(project){
     const counts={};for(const o of ops){if(!allow.has(o.op))counts[o.op]=(counts[o.op]||0)+1;}
     return Object.entries(counts).map(([kind,n])=>kind+' × '+n).join(', ');
   };
+  if(project.target==='mega2560'){
+    if(['FLOAT32','INT8'].includes(input.dtype) && output.dtype===input.dtype && shape==='1,16,16,1' &&
+       (output.shape||[]).join(',')==='1,10' && ops.map(o=>o.op).join('|')===MEGA_MOBILE_OPS)
+      return {supported:true,backend:'mega_mobile_lenet',reason:'Mega2560 Mobile-LeNet-16 '+input.dtype+' exporter (PROGMEM parameters, SD/SRAM activations).',detail:signature};
+    return no('Mega2560 currently supports the reference 18-op Mobile-LeNet-16 architecture only; import the supplied INT8 or FP32 .tflite.',signature);
+  }
   if(project.target==='uno'){
     if(src.model_sha256===LENET5_INT8_SHA && input.dtype==='INT8')
       return {supported:true,backend:'uno_lenet5',reason:'Supported: LeNet-5 INT8 Uno/SD exporter.',detail:signature};
@@ -220,6 +243,7 @@ function validate(project) {
   if(project.source?.type==='tflite'&&!project.source.model_base64) errors.push('TFLite model binary missing. Re-import original .tflite to retain weights and biases.');
   if(project.source?.type==='tflite'&&project.source.warnings)warnings.push(...project.source.warnings);
   const currentExport=firmwareCompatibility(project);
+  if(currentExport.backend==='mega_mobile_lenet') warnings.push('Mega2560 Mobile-LeNet-16: model-specific SD/SRAM memory plan; only source graph layout and PROGMEM parameters are supported.');
   if(currentExport.backend==='s3_int8') warnings.push('ESP32-S3 UINT8/W8A8 SqueezeNet-family exporter: PSRAM activations and XIP parameters; numerical equivalence should be validated.');
   if(currentExport.backend==='s3_fp32_generic') warnings.push('Generic ESP32-S3 FP32 exporter is experimental; only supported operator options and PSRAM/XIP paths are generated.');
   if(currentExport.backend==='s3_fp32') warnings.push('ESP32-S3 FP32 SqueezeNet-family exporter: experimental; PSRAM activations and XIP parameters.');
@@ -305,9 +329,9 @@ function selectedOptions(values,current) {
   return opts.join('');
 }
 function render() {
-  $('pingPongOption').checked=state?.settings?.apply_pingpong_sequential===true;
   $('board').value=state.target;
-  $('sdPinSettings').hidden=state.target!=='uno';
+  $('sdPinSettings').hidden=!['uno','mega2560'].includes(state.target);
+  $('sdPinSettings').innerHTML=state.target==='mega2560'?'<span class="hint"><strong>Mega2560 SD wiring:</strong> CS = D53 · MOSI = D51 · MISO = D50 · SCK = D52 · GND = GND. Use a level-shifted SD module for 5V I/O. Model parameters are in PROGMEM; SD stores feature maps.</span>':'<span class="hint"><strong>Uno / Nano SD wiring:</strong> CS = D10 · MOSI = D11 · MISO = D12 · SCK = D13 · GND = GND. Use a properly level-shifted SD module.</span>';
   $('capabilities').innerHTML=BOARD[state.target].tags.map(x=>`<span class="pill">${textEscape(x)}</span>`).join('');
   $('storageTable').querySelector('tbody').innerHTML=state.storage.map((b,i)=>`<tr data-row="${i}">
     <td><input data-bfield="name" data-index="${i}" aria-label="Storage name ${i+1}" value="${textEscape(b.name)}"></td>
@@ -340,9 +364,9 @@ function renderModelInfo(){
     <div class="model-export-notice ${firmwareCompatibility(state).supported?'export-supported':'export-unsupported'}" role="status"><b>${firmwareCompatibility(state).supported?'Firmware export available':'Inspection only — firmware export unavailable'}</b><span>${textEscape(firmwareCompatibility(state).reason)} ${textEscape(firmwareCompatibility(state).detail||'')}</span></div>
     <details class="model-details"><summary>Inspect quantization and parameter metadata</summary><div class="model-tensor-scroll"><table><thead><tr><th>Tensor</th><th>Shape</th><th>Type</th><th>Scale(s)</th><th>Zero point(s)</th><th>Bytes</th></tr></thead><tbody>${(source.tensors||[]).map(t=>`<tr><td title="${textEscape(t.name)}">${t.id} · ${textEscape(t.name)}</td><td>${textEscape(t.shape.join('×'))}</td><td>${textEscape(t.dtype)}</td><td>${(t.quantization?.scales||[]).length}${(t.quantization?.scales||[]).length===1?' ('+textEscape(t.quantization.scales[0])+')':''}</td><td>${(t.quantization?.zero_points||[]).length}${(t.quantization?.zero_points||[]).length===1?' ('+textEscape(t.quantization.zero_points[0])+')':''}</td><td>${t.parameter_bytes}</td></tr>`).join('')}</tbody></table></div></details>`;
 }
-// Browser-only graph classification. This never selects a memory plan or modifies firmware.
-// Analyze the imported TFLite metadata, not the editable topology; the backend checks
-// the latter and storage safety when firmware is actually generated.
+// Browser graph classification for diagnostics and automatic strategy selection.
+// Analyze imported TFLite metadata; the backend checks edited topology and
+// tensor-storage safety again when firmware is actually generated.
 function sourceSequentialAnalysis(project){
   const src=project?.source;
   if(src?.type!=='tflite') return {sequential:null,reason:'Import a TFLite model to inspect its graph.'};
@@ -352,12 +376,26 @@ function sourceSequentialAnalysis(project){
   try { return SEQUENTIAL.analyze(src); }
   catch(err) { return {sequential:null,reason:'Cannot inspect this graph: '+err.message}; }
 }
+// The UI does not expose memory-policy switches. The existing tested exporters
+// still accept the historical flag internally, but only this generation-time
+// copy receives an automatically computed value. Saved projects stay neutral.
+function automaticMemoryProject(project, backend){
+  const settings={...(project.settings||{})};
+  delete settings.apply_pingpong_sequential; // ignore stale checkbox state in old JSON
+  if(['s3_fp32_generic','uno_fcn','uno_lenet5'].includes(backend)){
+    const src=project.source;
+    const eligible=src?.type==='tflite' && SEQUENTIAL?.analyze &&
+      SEQUENTIAL.analyze(src,{storage:project.storage}).sequential===true;
+    // Each generator validates the edited execution graph again before emitting.
+    settings.apply_pingpong_sequential=eligible===true;
+  }
+  return {...project,settings};
+}
 function renderSequentialAnalysis(){
   const el=$('sequentialAnalysis');if(!el)return;
   const result=sourceSequentialAnalysis(state);
   const cap=firmwareCompatibility(state);
-  const supportsPingPong=cap.backend==='s3_fp32_generic';
-  const requested=state.settings?.apply_pingpong_sequential===true;
+  const supportsPingPong=['s3_fp32_generic','uno_fcn','uno_lenet5'].includes(cap.backend);
   const type=result.sequential===true?'sequential':result.sequential===false?'branched':'unavailable';
   const title=result.sequential===true ? `Sequential source graph (${result.operatorCount} operators)` :
     result.sequential===false?'Non-sequential source graph':'Graph classification unavailable';
@@ -365,13 +403,15 @@ function renderSequentialAnalysis(){
     result.sequential===null?result.reason:'';
   let policy;
   if(supportsPingPong && result.sequential===true)
-    policy=requested?'Ping-pong requested. Codegen verifies edited topology and buffers when generating firmware.':'Default: lifetime-based allocator. Check the box to request ping-pong.';
-  else if(supportsPingPong && requested)
-    policy='Ping-pong is requested but the graph is not eligible; Codegen will reject unsafe export.';
+    policy='Automatic A/B ping-pong when the edited topology and tensor declarations pass Codegen validation.';
   else if(supportsPingPong)
-    policy='The existing lifetime-based allocator remains selected.';
+    policy='The existing safe allocator is retained when the graph is not a strict sequential chain.';
+  else if(cap.backend==='s3_int8')
+    policy=state.settings?.reuse_branch_buffers===false?'Legacy INT8 allocation selected (one physical PSRAM buffer per tensor).':'Automatic lifetime-aware PSRAM buffer reuse will be planned during Codegen.';
+  else if(cap.backend==='s3_fp32')
+    policy='The existing FP32 lifetime-aware allocator is used for this branching graph.';
   else
-    policy='Classification only. This target/backend keeps its existing memory strategy.';
+    policy='This exporter retains its existing validated memory strategy.';
   el.className='sequential-diagnostic '+type;
   el.innerHTML=`<strong>${textEscape(title)}</strong>${detail?' · '+textEscape(detail):''}<div>${textEscape(policy)}</div><small>Source TFLite classification only; edited topology and storage are validated separately during Codegen.</small>`;
 }
@@ -400,7 +440,8 @@ function download(name, content, type='text/plain') {
 function exportJSON(){
   const result=validate(state);
   if(result.errors.length && !confirm(`Project contains ${result.errors.length} validation error(s). Export anyway?`))return;
-  download('noodle_r15_project.json',JSON.stringify(state,null,2)+'\n','application/json');
+  const clean=automaticMemoryProject(state,null);
+  download('noodle_r15_project.json',JSON.stringify(clean,null,2)+'\n','application/json');
 }
 function handleInput(e) {
   const target=e.target, idx=Number(target.dataset.index);
@@ -443,6 +484,14 @@ async function bundledLeNetModel(which){
   return project;
 }
 
+async function bundledMegaLeNet(which){
+  if(typeof NoodleMobileLeNetExamples==='undefined')throw Error('Mega reference models missing.');
+  const item=NoodleMobileLeNetExamples.get(which);
+  const bytes=TFLITE.base64Decode(item.base64);
+  const digest=await TFLITE.sha256(bytes);
+  if(digest!==item.sha256)throw Error('Bundled Mega Mobile-LeNet checksum mismatch');
+  return fromTFLiteModel(TFLITE.inspectTFLite(bytes),item.filename,bytes,digest);
+}
 async function bundledZooTFLite(key){
   if(!TFLITE || typeof NoodleModelZoo==='undefined') throw new Error('Bundled model zoo is missing.');
   const item=NoodleModelZoo.getTFLite(key);
@@ -482,7 +531,9 @@ function init(){
     const v=e.target.value;
     if(!v) return;
     try {
-      if(v==='zoo_fcn_int8') state=await bundledZooTFLite('fcn_mnist16_int8');
+      if(v==='zoo_mobile_int8') state=await bundledMegaLeNet('int8');
+      else if(v==='zoo_mobile_fp32') state=await bundledMegaLeNet('fp32');
+      else if(v==='zoo_fcn_int8') state=await bundledZooTFLite('fcn_mnist16_int8');
       else if(v==='zoo_lenet_int8') state=bundledZooProject('lenet_int8_project');
       else if(v==='zoo_sq_int8') state=bundledZooProject('squeezenet_int8_project');
       else if(v==='zoo_sq_fp32') state=bundledZooProject('squeezenet_fp32_project');
@@ -508,11 +559,6 @@ function init(){
     state.layers.push({name:'layer'+n,kind:'FCN',params:BOARD[state.target].params[0],output_shape:''});render();
   });
   $('topology').addEventListener('input',e=>{state.topology=e.target.value;renderDerived();});
-  $('pingPongOption').addEventListener('change',e=>{
-    state.settings=state.settings||{};
-    state.settings.apply_pingpong_sequential=e.target.checked;
-    renderDerived();
-  });
   $('exportBtn').addEventListener('click',exportJSON);
   $('cppBtn').addEventListener('click',()=>download('noodle_r15_static_call_plan.cpp',cppPreview(state)));
   $('firmwareBtn').addEventListener('click',async()=>{
@@ -527,12 +573,13 @@ function init(){
       }
       const capability=firmwareCompatibility(state);
       if(!capability.supported) throw Error(capability.reason+' '+(capability.detail||''));
-      const generators={s3_int8:()=>NoodleESP32S3.generate(state),s3_fp32:()=>NoodleESP32S3FP32.generate(state),s3_fp32_generic:()=>NoodleESP32S3GenericFP32.generate(state),uno_lenet5:()=>NoodleLeNetUno.generate(state),uno_fcn:()=>NoodleCodegen.generate(state)};
-      const names={s3_int8:'noodle_r15_esp32s3_squeezenet_int8_xip_psram.zip',s3_fp32:'noodle_r15_esp32s3_squeezenet_fp32_xip_psram.zip',s3_fp32_generic:'noodle_r15_esp32s3_generic_fp32_firmware.zip',uno_lenet5:'noodle_r15_v06_UNO_LENET5_EXPERIMENTAL.zip',uno_fcn:'noodle_r15_v06_uno_int8_firmware.zip'};
-      const packageFiles=generators[capability.backend]();
+      const names={mega_mobile_lenet:'noodle_r15_mega2560_mobile_lenet16_firmware.zip',s3_int8:'noodle_r15_esp32s3_squeezenet_int8_xip_psram.zip',s3_fp32:'noodle_r15_esp32s3_squeezenet_fp32_xip_psram.zip',s3_fp32_generic:'noodle_r15_esp32s3_generic_fp32_firmware.zip',uno_lenet5:'noodle_r15_v06_UNO_LENET5_EXPERIMENTAL.zip',uno_fcn:'noodle_r15_v06_uno_int8_firmware.zip'};
+      const exportProject=automaticMemoryProject(state,capability.backend);
+      const packageFiles=({mega_mobile_lenet:()=>NoodleMegaMobileLeNet.generate(exportProject),s3_int8:()=>NoodleESP32S3.generate(exportProject),s3_fp32:()=>NoodleESP32S3FP32.generate(exportProject),s3_fp32_generic:()=>NoodleESP32S3GenericFP32.generate(exportProject),uno_lenet5:()=>NoodleLeNetUno.generate(exportProject),uno_fcn:()=>NoodleCodegen.generate(exportProject)})[capability.backend]();
       download(names[capability.backend],NoodleCodegen.zip(packageFiles.files),'application/zip');
-      const policy=packageFiles.summary.sequentialPingPong?'Ping-pong ENABLED (two PSRAM regions)':(capability.backend==='s3_fp32_generic'?'Static lifetime arena':(state.settings?.apply_pingpong_sequential?'Ping-pong not applicable; explicit buffers preserved':'Ping-pong OFF (default)'));
-      $('generateStatus').textContent=capability.reason+' '+policy+' · '+packageFiles.summary.layers.length+' layer calls · '+packageFiles.summary.sdLayers+' SD parameter layers.';
+      const chwText=packageFiles.summary.unifiedCHW?' · unified CHW · Noodle INT8 Conv2D/Pool/Concat':'';
+      const policy=packageFiles.summary.bufferReuse ? ('Branch-aware reuse: '+packageFiles.summary.activationBytes+' → '+packageFiles.summary.allocatedBytes+' B, '+packageFiles.summary.physicalBuffers+' physical buffers · maximum '+packageFiles.summary.maxLiveTensors+' simultaneously live tensors · peak live '+packageFiles.summary.peakLiveBytes+' B · lower bound '+packageFiles.summary.minimumPhysicalBuffers+' buffers') : (packageFiles.summary.sequentialPingPong?'Automatic A/B ping-pong':(capability.backend==='s3_fp32_generic'?'Static lifetime allocator':(capability.backend==='s3_fp32'?'FP32 lifetime allocator':(capability.backend==='mega_mobile_lenet'?'Reference SD/SRAM placement':'Existing safe allocation strategy'))));
+      $('generateStatus').textContent=capability.reason+' '+policy+' · '+packageFiles.summary.layers.length+' layer calls · '+packageFiles.summary.sdLayers+' SD parameter layers'+chwText+'.';
     }catch(err){$('generateStatus').textContent='Generation rejected: '+err.message;alert('Firmware generation unavailable: '+err.message);}
   });
   $('importBtn').addEventListener('click',()=>$('importFile').click());
@@ -542,4 +589,4 @@ function init(){
   // Fully local, no server: uploaded TFLite bytes remain in the browser and are embedded in the saved JSON.
 }
 if(typeof document!=='undefined') document.addEventListener('DOMContentLoaded',init);
-if(typeof module!=='undefined' && module.exports) module.exports={sampleUno,sampleFire,bundledLeNetModel,fromR14Graph,fromTFLiteModel,normalizeProject,validate,firmwareCompatibility,parseTopology,cppPreview};
+if(typeof module!=='undefined' && module.exports) module.exports={sampleUno,sampleFire,bundledLeNetModel,fromR14Graph,fromTFLiteModel,normalizeProject,validate,firmwareCompatibility,parseTopology,cppPreview,automaticMemoryProject};

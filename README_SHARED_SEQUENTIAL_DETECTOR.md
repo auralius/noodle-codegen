@@ -1,3 +1,5 @@
+> Historical behavior for the release named below. As of **v0.6.23**, the GUI no longer exposes the ping-pong checkbox; see [`README_AUTOMATIC_MEMORY_POLICY.md`](README_AUTOMATIC_MEMORY_POLICY.md). Existing direct Codegen APIs retain their legacy flags for compatibility.
+
 # Shared sequential-network detector — R15 v0.6.15 (conservative integration)
 
 `sequential_network_detector.js` exposes `NoodleSequentialNetwork.analyze(model, options)` in the browser, and `require('./sequential_network_detector.js').analyze(...)` in Node.

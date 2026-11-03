@@ -1,3 +1,5 @@
+> Historical behavior for the release named below. As of **v0.6.23**, the GUI no longer exposes the ping-pong checkbox; see [`README_AUTOMATIC_MEMORY_POLICY.md`](README_AUTOMATIC_MEMORY_POLICY.md). Existing direct Codegen APIs retain their legacy flags for compatibility.
+
 # R15 v0.6.5 — AVR INT8 sequential FCN
 
 - Default `q_avr_packed_fcn` streams `w06.bin` etc. in output-major order with one persistent weight handle; auxiliary handle is reused for input and metadata.

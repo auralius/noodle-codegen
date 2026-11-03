@@ -1,3 +1,5 @@
+> Historical behavior for the release named below. As of **v0.6.23**, the GUI no longer exposes the ping-pong checkbox; see [`README_AUTOMATIC_MEMORY_POLICY.md`](README_AUTOMATIC_MEMORY_POLICY.md). Existing direct Codegen APIs retain their legacy flags for compatibility.
+
 # ESP32-S3 FP32 sequential ping-pong experiment (v0.6.14)
 
 On a supported FP32 TFLite graph, **Apply ping-pong for sequential network** now selects two alternating regions (A/B) in one PSRAM allocation. No in-place operator aliases input and output. Each region is sized by the largest of the tensors mapped to that region. The original static liveness arena remains the default when unchecked, preserving SqueezeNet behavior.

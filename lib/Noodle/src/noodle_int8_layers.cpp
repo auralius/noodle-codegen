@@ -209,7 +209,25 @@ static bool q_conv2d_filter_direct(const NoodleTensor *input, uint16_t V,
 // caller, so file-backed layers can keep streaming one output filter at a
 // time.  Compared with q_conv2d_filter_direct(), this walks input rows and
 // output tiles explicitly, avoiding repeated q_conv2d_at() geometry work.
-static bool q_conv2d_filter_streaming_3x3(
+// A sufficient, input-independent INT32 safety proof for signed INT8 3x3:
+// |acc| <= |bias| + 9 * input_channels * max|qinput - input_zp| * 128.
+// Weight magnitudes never exceed 128. Using int64 for the proof avoids
+// overflow even with unusual zero points. If the bound fails, keep INT64.
+#if NOODLE_INT8_CONV3X3_ACC32
+static bool q_conv3x3_acc32_is_safe(uint16_t input_channels,
+                                   int32_t input_zp, int32_t bias) {
+  const int64_t low = -128LL - static_cast<int64_t>(input_zp);
+  const int64_t high = 127LL - static_cast<int64_t>(input_zp);
+  const int64_t max_input_abs =
+      (llabs(low) > llabs(high)) ? llabs(low) : llabs(high);
+  const int64_t bound = llabs(static_cast<int64_t>(bias)) +
+      static_cast<int64_t>(input_channels) * 9LL * max_input_abs * 128LL;
+  return bound <= INT32_MAX;
+}
+#endif
+
+template <typename Accumulator>
+static bool q_conv2d_filter_streaming_3x3_impl(
     const NoodleTensor *input, uint16_t V, uint16_t P0,
     const int8_t *filter, int32_t bias, int32_t multiplier, int32_t shift,
     uint16_t S, int32_t input_zp, int32_t output_zp,
@@ -219,7 +237,7 @@ static bool q_conv2d_filter_streaming_3x3(
 
   const uint16_t W = input->W;
   const uint16_t tile = static_cast<uint16_t>(NOODLE_INT8_OUTPUT_TILE);
-  int64_t tile_acc[NOODLE_INT8_OUTPUT_TILE * NOODLE_INT8_OUTPUT_TILE];
+  Accumulator tile_acc[NOODLE_INT8_OUTPUT_TILE * NOODLE_INT8_OUTPUT_TILE];
   const uint32_t in_plane = static_cast<uint32_t>(W) * W;
 
   for (uint16_t oy0 = 0; oy0 < V; oy0 = static_cast<uint16_t>(oy0 + tile)) {
@@ -250,10 +268,10 @@ static bool q_conv2d_filter_streaming_3x3(
               if (kx1 > 3) kx1 = 3;
               if (kx0 >= kx1) continue;
 
-              int64_t &a = tile_acc[static_cast<size_t>(oy - oy0) * tile + (ox - ox0)];
+              Accumulator &a = tile_acc[static_cast<size_t>(oy - oy0) * tile + (ox - ox0)];
               for (int32_t kx = kx0; kx < kx1; ++kx) {
                 const int32_t xv = static_cast<int32_t>(row[ix0 + kx]) - input_zp;
-                a += static_cast<int64_t>(xv) * wk[kx];
+                a += static_cast<Accumulator>(xv) * wk[kx];
               }
             }
           }
@@ -262,7 +280,7 @@ static bool q_conv2d_filter_streaming_3x3(
 
       for (uint16_t oy = oy0; oy < oy1; ++oy)
         for (uint16_t ox = ox0; ox < ox1; ++ox) {
-          const int64_t a = tile_acc[static_cast<size_t>(oy - oy0) * tile + (ox - ox0)];
+          const Accumulator a = tile_acc[static_cast<size_t>(oy - oy0) * tile + (ox - ox0)];
           out_plane[static_cast<uint32_t>(oy) * V + ox] = static_cast<int8_t>(
               q_apply_output(q_sat_i32(a), multiplier, shift, output_zp,
                              act_min, act_max));
@@ -270,6 +288,23 @@ static bool q_conv2d_filter_streaming_3x3(
     }
   }
   return true;
+}
+
+static bool q_conv2d_filter_streaming_3x3(
+    const NoodleTensor *input, uint16_t V, uint16_t P0,
+    const int8_t *filter, int32_t bias, int32_t multiplier, int32_t shift,
+    uint16_t S, int32_t input_zp, int32_t output_zp,
+    int32_t act_min, int32_t act_max, int8_t *out_plane) {
+#if NOODLE_INT8_CONV3X3_ACC32
+  // Checked per output filter. The guard does NOT assume a particular model.
+  if (input && q_conv3x3_acc32_is_safe(input->C, input_zp, bias))
+    return q_conv2d_filter_streaming_3x3_impl<int32_t>(
+        input, V, P0, filter, bias, multiplier, shift, S, input_zp,
+        output_zp, act_min, act_max, out_plane);
+#endif
+  return q_conv2d_filter_streaming_3x3_impl<int64_t>(
+      input, V, P0, filter, bias, multiplier, shift, S, input_zp,
+      output_zp, act_min, act_max, out_plane);
 }
 
 static bool q_conv2d_filter(const NoodleTensor *input, uint16_t V,
@@ -1612,6 +1647,46 @@ uint16_t noodle_i8_conv2d(NoodleTensor *input, const ConvMem &layer,
   if (!dst) return 0;
   const uint32_t filter_size = static_cast<uint32_t>(input->C) * layer.K * layer.K;
   const uint32_t out_plane = static_cast<uint32_t>(g.V) * g.V;
+  // Optional four-spatial-pixel reuse for native CHW 1x1 ConvMem.
+  // Off unless enabled for a tested target; the standard kernel remains intact.
+#if defined(NOODLE_INT8_POINTWISE_PIXELS) && NOODLE_INT8_POINTWISE_PIXELS == 4
+  if (layer.K == 1 && layer.S == 1 && g.V == input->W && g.P0 == 0) {
+    const uint32_t pixels = static_cast<uint32_t>(input->W) * input->W;
+    for (uint16_t oc = 0; oc < layer.O; ++oc) {
+      const int8_t *weights = layer.weight + static_cast<size_t>(oc) * input->C;
+      int8_t *out = dst + static_cast<size_t>(oc) * pixels;
+      uint32_t pos = 0;
+      for (; pos + 3 < pixels; pos += 4) {
+        int32_t s0 = layer.bias ? layer.bias[oc] : 0;
+        int32_t s1 = s0, s2 = s0, s3 = s0;
+        for (uint16_t ic = 0; ic < input->C; ++ic) {
+          const int8_t *in = input->buffer.data + static_cast<size_t>(ic) * pixels + pos;
+          const int32_t weight = weights[ic];
+          s0 += (int32_t(in[0]) - layer.input_zero_point) * weight;
+          s1 += (int32_t(in[1]) - layer.input_zero_point) * weight;
+          s2 += (int32_t(in[2]) - layer.input_zero_point) * weight;
+          s3 += (int32_t(in[3]) - layer.input_zero_point) * weight;
+        }
+        out[pos] = static_cast<int8_t>(q_apply_output(s0, layer.multiplier[oc], layer.shift[oc],
+            layer.output_zero_point, layer.activation_min, layer.activation_max));
+        out[pos+1] = static_cast<int8_t>(q_apply_output(s1, layer.multiplier[oc], layer.shift[oc],
+            layer.output_zero_point, layer.activation_min, layer.activation_max));
+        out[pos+2] = static_cast<int8_t>(q_apply_output(s2, layer.multiplier[oc], layer.shift[oc],
+            layer.output_zero_point, layer.activation_min, layer.activation_max));
+        out[pos+3] = static_cast<int8_t>(q_apply_output(s3, layer.multiplier[oc], layer.shift[oc],
+            layer.output_zero_point, layer.activation_min, layer.activation_max));
+      }
+      for (;pos<pixels;++pos) {
+        int32_t sum=layer.bias?layer.bias[oc]:0;
+        for(uint16_t ic=0;ic<input->C;++ic)
+          sum+=(int32_t(input->buffer.data[static_cast<size_t>(ic)*pixels+pos])-layer.input_zero_point)*weights[ic];
+        out[pos]=static_cast<int8_t>(q_apply_output(sum,layer.multiplier[oc],layer.shift[oc],
+            layer.output_zero_point,layer.activation_min,layer.activation_max));
+      }
+    }
+    return g.V;
+  }
+#endif
 #if NOODLE_INT8_PW_IMPL
   if (layer.K == 1) {
     int32_t bias_block[NOODLE_INT8_PW_OUTPUT_BLOCK];

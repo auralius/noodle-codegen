@@ -1,0 +1,28 @@
+'use strict';
+// Regression for the retired NHWC option: no NHWC-only INT8 code is exported.
+const fs=require('fs'),assert=require('node:assert/strict'),vm=require('vm');
+const P=require('./esp32s3_codegen.js');
+const project=process.argv[2]?JSON.parse(fs.readFileSync(process.argv[2],'utf8')):require('./model_zoo_examples.js').getProject('squeezenet_int8_project');
+const generated=P.generate(project);
+const files=generated.files,code=files['src/main.cpp'];
+assert.match(code,/#include <noodle_int8.h>/);
+assert.match(code,/noodle_i8_graph_execute\(/);
+assert.match(code,/static NoodleTensor physicalTensors\[3\]/);
+assert.match(code,/noodle_buffer_bind_external\(/);
+assert.equal(generated.summary.physicalBuffers,3);
+assert.equal(generated.summary.allocatedBytes,1369344);
+assert.equal(generated.summary.operators,43);
+assert(!Object.keys(files).some(name=>/nhwc.*\.(?:cpp|h)$/i.test(name)));
+const old=structuredClone(project);old.settings={...(old.settings||{}),reuse_branch_buffers:false,experimental_chw:false};
+const baseline=P.generate(old);
+assert.equal(baseline.summary.physicalBuffers,44);
+assert.match(baseline.files['src/main.cpp'],/static NoodleTensor physicalTensors\[44\]/);
+assert(Buffer.from(files['model/params.bin']).equals(Buffer.from(baseline.files['model/params.bin'])));
+const scope={console,TextEncoder,TextDecoder,Uint8Array,ArrayBuffer,DataView,atob,btoa};scope.globalThis=scope;
+const ctx=vm.createContext(scope);
+for(const name of ['tflite_import.js','noodle_bundle.js','branch_buffer_planner.js','sequential_network_detector.js','s3_serial_sender_bundle.js','esp32s3_chw_transform.js','esp32s3_codegen.js'])vm.runInContext(fs.readFileSync(name,'utf8'),ctx,{filename:name});
+ctx.project=project;
+const exported=vm.runInContext('NoodleESP32S3.generate(project)',ctx);
+assert(Buffer.from(exported.files['model/params.bin']).equals(Buffer.from(files['model/params.bin'])));
+assert.equal(exported.files['src/main.cpp'],code);
+console.log('PASS: canonical CHW, 3-buffer branch plan, 44-buffer regression fallback, no NHWC INT8 kernels, browser parity');

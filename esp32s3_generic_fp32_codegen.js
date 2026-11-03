@@ -264,6 +264,8 @@ print('OUTPUT_FLOAT32',' '.join(f'{v:.7f}' for v in y))
   'test/send_tensor.py':sender,'test/input_spec.json':JSON.stringify(spec,null,2)+'\n','test/output_spec.json':JSON.stringify(outputSpec,null,2)+'\n','test/reference.py':reference,'README_ESP32S3_GENERIC_FP32.md':guide};
  delete files['lib/Noodle/src/noodle_s3_nhwc_i8.cpp'];
  delete files['lib/Noodle/src/noodle_s3_nhwc_i8.h'];
+ delete files['lib/Noodle/src/noodle_i8_nhwc.h'];
+ delete files['lib/Noodle/src/noodle_i8_nhwc.cpp'];
  return {files,summary:{layers:ops,sdLayers:0,sequentialPingPong:plan.method==='pingpong',arenaBytes:plan.arenaBytes,paramsBytes:cursor,peakLive:plan.peakLive}};
 }
 root.NoodleESP32S3GenericFP32={generate,memoryPlan,pingPongPlan};

@@ -1,0 +1,27 @@
+'use strict';
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
+const T=require('./tflite_import.js'),D=require('./sequential_network_detector.js'),S=require('./studio.js');
+const G=require('./esp32s3_generic_fp32_codegen.js');
+const I=require('./esp32s3_codegen.js');
+const U=require('./firmware_codegen.js');
+function load(name){const bytes=fs.readFileSync(path.join(__dirname,name)),model=T.inspectTFLite(bytes);return S.fromTFLiteModel(model,name,bytes,'test');}
+const f=load('fcn_mnist16_fp32.tflite');const ff=S.automaticMemoryProject(f,'s3_fp32_generic');
+assert.equal(D.analyze(f.source,{storage:f.storage}).sequential,true);
+assert.equal(ff.settings.apply_pingpong_sequential,true);
+assert.equal(G.generate(ff).summary.sequentialPingPong,true);
+const legacy=structuredClone(f);legacy.settings={apply_pingpong_sequential:false};
+assert.equal(S.automaticMemoryProject(legacy,'s3_fp32_generic').settings.apply_pingpong_sequential,true);
+assert.equal(legacy.settings.apply_pingpong_sequential,false);
+const i=load('fcn_mnist16_int8.tflite');assert.equal(S.automaticMemoryProject(i,'uno_fcn').settings.apply_pingpong_sequential,true);
+assert.equal(U.generate(S.automaticMemoryProject(i,'uno_fcn')).summary.sequentialPingPong,true);
+const branched=structuredClone(f);branched.source.operators[1].inputs[0]=branched.source.inputs[0];
+assert.equal(S.automaticMemoryProject(branched,'s3_fp32_generic').settings.apply_pingpong_sequential,false);
+const branchInt8=structuredClone(i);branchInt8.settings={apply_pingpong_sequential:true};
+assert.equal(S.automaticMemoryProject(branchInt8,'s3_int8').settings.apply_pingpong_sequential,undefined);
+assert.equal(S.automaticMemoryProject(branchInt8,'mega_mobile_lenet').settings.apply_pingpong_sequential,undefined);
+const html=fs.readFileSync(path.join(__dirname,'index.html'),'utf8'),js=fs.readFileSync(path.join(__dirname,'studio.js'),'utf8');
+assert(!html.includes('pingPongOption')&&!js.includes('pingPongOption'));
+assert(!html.includes('Apply ping-pong for sequential network'));
+assert(!html.includes('experimentalCHW'));
+assert(!js.includes("$('experimentalCHW')"));
+console.log('PASS: automatic memory selection for generic FP32, Uno FCN, branched fallback, legacy JSON, clean GUI');

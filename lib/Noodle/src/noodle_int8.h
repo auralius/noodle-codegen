@@ -155,4 +155,38 @@ void noodle_build_tanh_lut(float input_scale, int32_t input_zero_point,
                            int8_t output_lut[256]);
 void noodle_i8_temp_buffers_free(void);
 
+
+// Codegen graph descriptors bind logical CHW activations to reusable physical
+// NoodleTensor/NoodleBuffer instances. The numerical kernels below are the
+// ordinary portable Noodle INT8 operators (ConvMem/Pool/Concat).
+struct NoodleI8GraphTensor {
+  NoodleTensor *storage;
+  uint32_t bytes;
+  uint16_t h,w,c;
+  int32_t zero_point;
+  float scale;
+  bool is_uint8;
+};
+enum NoodleI8GraphOpType : uint8_t {
+  NDL_I8_GRAPH_CONV=1, NDL_I8_GRAPH_MAXPOOL=2, NDL_I8_GRAPH_CONCAT=3,
+  NDL_I8_GRAPH_QUANTIZE=4, NDL_I8_GRAPH_SUB=5, NDL_I8_GRAPH_MUL=6,
+  NDL_I8_GRAPH_MEAN=7, NDL_I8_GRAPH_RESHAPE=8
+};
+struct NoodleI8GraphOp {
+  uint8_t type,relu;
+  uint16_t src0,src1,dst;
+  uint16_t kh,kw,stride_h,stride_w;
+  uint32_t weights,bias,multipliers,shifts;
+  float constant_scale;
+  int32_t constant_zero_point;
+};
+static inline uint8_t *noodle_i8_graph_data(NoodleI8GraphTensor &t) {
+  return t.storage ? reinterpret_cast<uint8_t*>(noodle_tensor_data(t.storage)) : nullptr;
+}
+static inline const uint8_t *noodle_i8_graph_data(const NoodleI8GraphTensor &t) {
+  return t.storage ? reinterpret_cast<const uint8_t*>(noodle_tensor_const_data(t.storage)) : nullptr;
+}
+bool noodle_i8_graph_execute(const NoodleI8GraphOp &op, NoodleI8GraphTensor *t,
+                             size_t count, const uint8_t *parameter_base, size_t parameter_bytes);
+
 #endif

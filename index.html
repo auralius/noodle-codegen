@@ -3,18 +3,18 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Noodle Studio · R15 v0.6.16 — Shared Sequential Detector GUI</title>
+  <title>Noodle Studio · R15 v0.6.27 — Unified INT8 CHW</title>
   <link rel="stylesheet" href="studio.css">
 </head>
 <body>
   <header class="topbar">
-    <div class="brand"><span class="logo">N</span><div><b>Noodle Studio</b><small>R15 v0.6.16 · TFLite import · operator-driven FP32</small></div></div>
-    <div class="righttools"><span class="phase">Offline · Uno INT8 + ESP32-S3 W8A8 + FP32 experimental</span><button id="tfliteBtn">Import TFLite</button><button id="firmwareBtn">Generate Firmware ZIP</button><button id="importBtn" class="secondary">Open Project JSON</button><button id="exportBtn" class="secondary">Save Project JSON</button></div>
+    <div class="brand"><span class="logo">N</span><div><b>Noodle Studio</b><small>R15 v0.6.27 · TFLite import · automatic buffer reuse</small></div></div>
+    <div class="righttools"><span class="phase">Offline · Uno + Mega2560 Mobile-LeNet + ESP32-S3</span><button id="tfliteBtn">Import TFLite</button><button id="firmwareBtn">Generate Firmware ZIP</button><button id="importBtn" class="secondary">Open Project JSON</button><button id="exportBtn" class="secondary">Save Project JSON</button></div>
   </header>
   <main>
     <div class="intro">
       <div><h1>Import your model. Assemble your network.</h1><p>Start from an INT8, UINT8, or FLOAT32 TFLite model, then choose buffers, parameter storage, and execution order. Save the complete project as JSON — including the original weights and quantization.</p></div>
-      <div class="examples"><label for="example">Start from tested model zoo</label><select id="example"><option value="">Select a tested model…</option><option value="zoo_fcn_int8">FCN-MNIST16 · INT8 TFLite (Uno)</option><option value="zoo_lenet_int8">LeNet-5 · INT8 project (Uno/SD)</option><option value="zoo_sq_int8">SqueezeNet 1.1 · INT8 project (ESP32-S3)</option><option value="zoo_sq_fp32">SqueezeNet 1.1 · FP32 project (ESP32-S3)</option></select></div>
+      <div class="examples"><label for="example">Start from tested model zoo</label><select id="example"><option value="">Select a tested model…</option><option value="zoo_mobile_int8">Mobile-LeNet-16 · INT8 (Mega2560)</option><option value="zoo_mobile_fp32">Mobile-LeNet-16 · FP32 (Mega2560)</option><option value="zoo_fcn_int8">FCN-MNIST16 · INT8 TFLite (Uno)</option><option value="zoo_lenet_int8">LeNet-5 · INT8 project (Uno/SD)</option><option value="zoo_sq_int8">SqueezeNet 1.1 · INT8 project (ESP32-S3)</option><option value="zoo_sq_fp32">SqueezeNet 1.1 · FP32 project (ESP32-S3)</option></select></div>
     </div>
     <section class="model-panel panel" aria-label="Source model">
       <div class="panelTitle"><div><div class="eyebrow">Model source · Local import</div><h2>Imported model and quantization</h2></div><span class="pill">TFL3 · INT8 / UINT8 / FLOAT32</span></div>
@@ -25,13 +25,13 @@
       <div class="editors">
         <section class="panel">
           <div class="panelTitle"><div><div class="eyebrow">01 · Deployment target</div><h2>Board and capabilities</h2></div></div>
-          <div class="boardrow"><div><label for="board">Target board</label><select id="board"><option value="uno">Arduino Uno / Nano (ATmega328P)</option><option value="esp32s3">ESP32-S3 N16R8 (PSRAM + XIP)</option></select></div><div id="capabilities" class="capability"></div></div>
+          <div class="boardrow"><div><label for="board">Target board</label><select id="board"><option value="uno">Arduino Uno / Nano (ATmega328P)</option><option value="mega2560">Arduino Mega2560 (ATmega2560)</option><option value="esp32s3">ESP32-S3 N16R8 (PSRAM + XIP)</option></select></div><div id="capabilities" class="capability"></div></div>
           <p class="hint">Choices are never changed silently. On Uno/Nano, Codegen preallocates used SRAM tensors before SD initialization, reduces UART buffers to 32/16 bytes, and stores any Softmax lookup table in Flash rather than on the stack. Remove Softmax from the topology explicitly to classify by logits.</p>
           <div class="deploy-settings" id="sdPinSettings"><span class="hint"><strong>Standard Uno / Nano SD wiring (fixed):</strong> CS = D10 &nbsp;·&nbsp; MOSI = D11 &nbsp;·&nbsp; MISO = D12 &nbsp;·&nbsp; SCK = D13 &nbsp;·&nbsp; GND = GND. Use a properly level-shifted, 5V-compatible SD module or 3.3V wiring. Codegen uses the board hardware SPI pins.</span></div>
         </section>
         <section class="panel">
           <div class="panelTitle"><div><div class="eyebrow">02 · User-owned memory</div><h2>Buffers and files</h2></div><button class="secondary small" id="addBuffer">+ Add storage</button></div>
-          <p class="hint">A name such as <code>out1</code> can refer to <code>/out1.bin</code>. The file path is storage metadata; it isn't C++ syntax.</p>
+          <p class="hint">These are logical tensor declarations, not necessarily one physical allocation each. For ESP32-S3 branched INT8 graphs, Codegen automatically shares PSRAM buffers across non-overlapping tensor lifetimes. A name such as <code>out1</code> can refer to <code>/out1.bin</code>; paths are storage metadata.</p>
           <div class="table-scroll"><table class="editor-table" id="storageTable"><thead><tr><th>Name</th><th>Backend</th><th>File path (if applicable)</th><th>Optional shape</th><th></th></tr></thead><tbody></tbody></table></div>
         </section>
         <section class="panel">
@@ -41,11 +41,11 @@
         </section>
         <section class="panel">
           <div class="panelTitle"><div><div class="eyebrow">04 · User controls the graph</div><h2>Topology</h2></div><span class="syntax">A = layer(B);</span></div>
-          <label class="codegen-option" for="pingPongOption"><input type="checkbox" id="pingPongOption"> Apply ping-pong for sequential network</label>
+          <p class="hint">SqueezeNet INT8 exports use the unified Noodle CHW operators automatically.</p>
           <div id="sequentialAnalysis" class="sequential-diagnostic unavailable" aria-live="polite">Graph classification unavailable until a TFLite model is imported.</div>
-          <p class="hint">Off by default. ESP32-S3 FP32 uses static lifetime-aware reuse unless ping-pong is selected. Ping-pong requires a strict single-input chain (no branches/skip connections), with separate input/output buffers; unsupported graphs are rejected rather than silently changed.</p>
+          <p class="hint">Codegen selects memory reuse automatically where supported: A/B ping-pong for validated sequential models, branch-aware reuse for SqueezeNet INT8, or the existing safe lifetime/specialized allocation for other graphs and boards. Operators and their input/output lifetimes are validated before firmware generation.</p>
           <label for="topology" class="sr-only">Topology source</label><textarea id="topology" spellcheck="false" placeholder="buffA = layer1(buffB);\nout1 = layer2(buffA);"></textarea>
-          <div class="support"><span>Supported syntax: <code>output = layer(input);</code>, <code>out = concat(a, b);</code>, <code>destroy(buffer);</code>, <code>close(file);</code>.</span><span>No automatic reordering; optional sequential-only ping-pong</span></div>
+          <div class="support"><span>Supported syntax: <code>output = layer(input);</code>, <code>out = concat(a, b);</code>, <code>destroy(buffer);</code>, <code>close(file);</code>.</span><span>No automatic reordering; memory strategy is selected automatically where supported</span></div>
         </section>
       </div>
       <aside class="side">
@@ -59,12 +59,12 @@
         </section>
         <section class="panel preview">
           <div class="panelTitle"><div><div class="eyebrow">Codegen boundary</div><h2>Static C++ preview</h2></div><button class="secondary small" id="cppBtn">Save .cpp</button></div>
-          <p class="hint">This preview shows the explicit call order. Firmware export supports Uno INT8 and an experimental ESP32-S3 W8A8 SqueezeNet or generic FP32 serial-input graph with PSRAM activations and XIP weights. Camera integration remains a separate step.</p>
+          <p class="hint">This preview shows the explicit call order. Firmware export supports Uno INT8, Mega2560 Mobile-LeNet-16 FP32/INT8, and ESP32-S3 SqueezeNet/generic FP32 with validated memory strategies. Camera integration remains a separate step.</p>
           <pre id="cppPreview"></pre><p id="generateStatus" class="generate-status" aria-live="polite">Generated firmware includes a generic binary serial sender for the model's input dimensions.</p>
         </section>
       </aside>
     </div>
-    <footer>Noodle Studio R15 v0.6.12 · Offline import and self-contained JSON · Direct Noodle operators · Uno low-memory + ESP32-S3 XIP/PSRAM · No automatic graph planner</footer>
+    <footer>Noodle Studio R15 v0.6.27 · Offline import and self-contained JSON · Direct Noodle operators · Automatic sequential + branch-aware buffer reuse</footer>
   </main>
   <input id="tfliteFile" type="file" accept=".tflite,application/octet-stream" hidden>
   <input id="importFile" type="file" accept=".json,application/json" hidden>
@@ -713,8 +713,10 @@
   <script src="model_zoo_examples.js"></script>
   <script src="lenet5_examples.js"></script>
   <script src="lenet_uno_codegen.js"></script>
-  <script src="noodle_s3_bundle.js"></script>
+  <script src="esp32s3_chw_transform.js"></script>
   <script src="s3_serial_sender_bundle.js"></script>
+  <script src="sequential_network_detector.js"></script>
+  <script src="branch_buffer_planner.js"></script>
   <script src="esp32s3_codegen.js"></script>
   <script src="s3_fp32_sender_bundle.js"></script>
   <script src="noodle_s3_fp32_bundle_h.js"></script>
@@ -723,8 +725,9 @@
   <script src="generic_fp32_sender_bundle.js"></script>
   <script src="noodle_s3_generic_fp32_bundle_h.js"></script>
   <script src="noodle_s3_generic_fp32_bundle_cpp.js"></script>
-  <script src="sequential_network_detector.js"></script>
   <script src="esp32s3_generic_fp32_codegen.js"></script>
+  <script src="mobile_lenet_examples.js"></script>
+  <script src="mega2560_mobile_lenet_codegen.js"></script>
   <script src="studio.js"></script>
 </body>
 </html>
